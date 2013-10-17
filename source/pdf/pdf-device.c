@@ -1335,6 +1335,7 @@ fz_device *pdf_page_write(pdf_document *doc, pdf_page *page)
 {
 	fz_context *ctx = doc->ctx;
 	pdf_obj *resources = pdf_dict_gets(page->me, "Resources");
+	pdf_obj *rstream;
 	fz_matrix ctm;
 	fz_pre_translate(fz_scale(&ctm, 1, -1), 0, page->mediabox.y0-page->mediabox.y1);
 
@@ -1349,8 +1350,9 @@ fz_device *pdf_page_write(pdf_document *doc, pdf_page *page)
 		pdf_obj *obj = pdf_new_dict(doc, 0);
 		fz_try(ctx)
 		{
-			page->contents = pdf_new_ref(doc, obj);
-			pdf_dict_puts(page->me, "Contents", obj);
+			rstream = pdf_new_ref(doc, obj);
+			page->contents = rstream;
+			pdf_dict_puts(page->me, "Contents", rstream);
 		}
 		fz_always(ctx)
 		{
@@ -1361,6 +1363,29 @@ fz_device *pdf_page_write(pdf_document *doc, pdf_page *page)
 			fz_rethrow(ctx);
 		}
 	}
+	else if (pdf_is_array(page->contents))
+	{
+		rstream = pdf_array_get(page->contents, 0);
+		if (!rstream)
+		{
+			pdf_obj *obj = pdf_new_dict(doc, 0);
+			fz_try(ctx)
+			{
+				rstream = pdf_new_ref(doc, obj);
+				pdf_array_push (page->contents, rstream);
+			}
+			fz_always(ctx)
+			{
+				pdf_drop_obj(obj);
+			}
+			fz_catch(ctx)
+			{
+				fz_rethrow(ctx);
+			}
+		}
+	}
+	else
+		rstream = page->contents;
 
-	return pdf_new_pdf_device(doc, page->contents, resources, &ctm);
+	return pdf_new_pdf_device(doc, rstream, resources, &ctm);
 }
