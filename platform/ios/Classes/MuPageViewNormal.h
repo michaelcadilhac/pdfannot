@@ -16,6 +16,7 @@
 #import "MuHitView.h"
 #import "MuPageView.h"
 #import "MuDocRef.h"
+#import "MuDialogCreator.h"
 
 @interface MuPageViewNormal : UIScrollView <UIScrollViewDelegate,MuPageView>
 {
@@ -26,16 +27,22 @@
 	fz_display_list *annot_list;
 	int number;
 	UIActivityIndicatorView *loadingView;
+	fz_pixmap *image_pix;
+	CGDataProviderRef imageData;
 	UIImageView *imageView;
+	fz_pixmap *tile_pix;
+	CGDataProviderRef tileData;
 	UIImageView *tileView;
 	MuHitView *hitView;
 	MuHitView *linkView;
+	NSArray *widgetRects;
 	CGSize pageSize;
 	CGRect tileFrame;
 	float tileScale;
 	BOOL cancel;
+	id<MuDialogCreator> dialogCreator;
 }
-- (id) initWithFrame: (CGRect)frame document: (MuDocRef *)aDoc page: (int)aNumber;
+- (id) initWithFrame: (CGRect)frame dialogCreator:(id<MuDialogCreator>)dia document: (MuDocRef *)aDoc page: (int)aNumber;
 - (void) displayImage: (UIImage*)image;
 - (void) resizeImage;
 - (void) loadPage;

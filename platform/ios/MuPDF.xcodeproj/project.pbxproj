@@ -37,6 +37,8 @@
 		DA1C68C417E8969C0061F586 /* common.m in Sources */ = {isa = PBXBuildFile; fileRef = DA1C68C317E8969C0061F586 /* common.m */; };
 		DAA6E56F17F03F96002B1E4E /* MuPageViewReflow.m in Sources */ = {isa = PBXBuildFile; fileRef = DAA6E56E17F03AAE002B1E4E /* MuPageViewReflow.m */; };
 		DAAC6A2E17FC6E4A00A0E83A /* MuTapResult.m in Sources */ = {isa = PBXBuildFile; fileRef = DAAC6A2D17FC6E4A00A0E83A /* MuTapResult.m */; };
+		DAB20D4518042D830030623F /* MuTextFieldController.m in Sources */ = {isa = PBXBuildFile; fileRef = DAB20D4318042D830030623F /* MuTextFieldController.m */; };
+		DAB20D4618042D830030623F /* MuTextFieldController.xib in Resources */ = {isa = PBXBuildFile; fileRef = DAB20D4418042D830030623F /* MuTextFieldController.xib */; };
 		DAB9F4BB17F1B24000117D2E /* ic_arrow_left.png in Resources */ = {isa = PBXBuildFile; fileRef = DAB9F4B517F1B24000117D2E /* ic_arrow_left.png */; };
 		DAB9F4BC17F1B24000117D2E /* ic_arrow_right.png in Resources */ = {isa = PBXBuildFile; fileRef = DAB9F4B617F1B24000117D2E /* ic_arrow_right.png */; };
 		DAB9F4BD17F1B24000117D2E /* ic_cancel.png in Resources */ = {isa = PBXBuildFile; fileRef = DAB9F4B717F1B24000117D2E /* ic_cancel.png */; };
@@ -45,6 +47,8 @@
 		DAB9F4C017F1B24000117D2E /* ic_magnifying_glass.png in Resources */ = {isa = PBXBuildFile; fileRef = DAB9F4BA17F1B24000117D2E /* ic_magnifying_glass.png */; };
 		DAB9F4C217F1CB6D00117D2E /* ic_reflow.png in Resources */ = {isa = PBXBuildFile; fileRef = DAB9F4C117F1CB6D00117D2E /* ic_reflow.png */; };
 		DABDEF5A17EC484A00AC35F1 /* MuDocRef.m in Sources */ = {isa = PBXBuildFile; fileRef = DABDEF5917EC484A00AC35F1 /* MuDocRef.m */; };
+		DABF8CC3180C28E60069CB6D /* MuChoiceFieldController.xib in Resources */ = {isa = PBXBuildFile; fileRef = DABF8CC2180C28E60069CB6D /* MuChoiceFieldController.xib */; };
+		DABF8CC6180C2C650069CB6D /* MuChoiceFieldController.m in Sources */ = {isa = PBXBuildFile; fileRef = DABF8CC5180C2C640069CB6D /* MuChoiceFieldController.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -99,6 +103,10 @@
 		DAA6E56E17F03AAE002B1E4E /* MuPageViewReflow.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = MuPageViewReflow.m; path = Classes/MuPageViewReflow.m; sourceTree = "<group>"; };
 		DAAC6A2C17FC6E4A00A0E83A /* MuTapResult.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MuTapResult.h; path = Classes/MuTapResult.h; sourceTree = "<group>"; };
 		DAAC6A2D17FC6E4A00A0E83A /* MuTapResult.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = MuTapResult.m; path = Classes/MuTapResult.m; sourceTree = "<group>"; };
+		DAB20D4218042D830030623F /* MuTextFieldController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MuTextFieldController.h; path = Classes/MuTextFieldController.h; sourceTree = "<group>"; };
+		DAB20D4318042D830030623F /* MuTextFieldController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = MuTextFieldController.m; path = Classes/MuTextFieldController.m; sourceTree = "<group>"; };
+		DAB20D4418042D830030623F /* MuTextFieldController.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; name = MuTextFieldController.xib; path = Classes/MuTextFieldController.xib; sourceTree = "<group>"; };
+		DAB20D4718045AC40030623F /* MuDialogCreator.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MuDialogCreator.h; path = Classes/MuDialogCreator.h; sourceTree = "<group>"; };
 		DAB9F4B517F1B24000117D2E /* ic_arrow_left.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = ic_arrow_left.png; path = "../android/res/drawable-ldpi/ic_arrow_left.png"; sourceTree = "<group>"; };
 		DAB9F4B617F1B24000117D2E /* ic_arrow_right.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = ic_arrow_right.png; path = "../android/res/drawable-ldpi/ic_arrow_right.png"; sourceTree = "<group>"; };
 		DAB9F4B717F1B24000117D2E /* ic_cancel.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = ic_cancel.png; path = "../android/res/drawable-ldpi/ic_cancel.png"; sourceTree = "<group>"; };
@@ -108,6 +116,9 @@
 		DAB9F4C117F1CB6D00117D2E /* ic_reflow.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = ic_reflow.png; path = "../android/res/drawable-ldpi/ic_reflow.png"; sourceTree = "<group>"; };
 		DABDEF5817EC484A00AC35F1 /* MuDocRef.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MuDocRef.h; path = Classes/MuDocRef.h; sourceTree = "<group>"; };
 		DABDEF5917EC484A00AC35F1 /* MuDocRef.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = MuDocRef.m; path = Classes/MuDocRef.m; sourceTree = "<group>"; };
+		DABF8CC2180C28E60069CB6D /* MuChoiceFieldController.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; name = MuChoiceFieldController.xib; path = Classes/MuChoiceFieldController.xib; sourceTree = "<group>"; };
+		DABF8CC4180C2C640069CB6D /* MuChoiceFieldController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MuChoiceFieldController.h; path = Classes/MuChoiceFieldController.h; sourceTree = "<group>"; };
+		DABF8CC5180C2C640069CB6D /* MuChoiceFieldController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = MuChoiceFieldController.m; path = Classes/MuChoiceFieldController.m; sourceTree = "<group>"; };
 		DADD8D6917EB24C000C49E0B /* MuPageView.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MuPageView.h; path = Classes/MuPageView.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -217,6 +228,13 @@
 				DAA6E56E17F03AAE002B1E4E /* MuPageViewReflow.m */,
 				DAAC6A2C17FC6E4A00A0E83A /* MuTapResult.h */,
 				DAAC6A2D17FC6E4A00A0E83A /* MuTapResult.m */,
+				DAB20D4218042D830030623F /* MuTextFieldController.h */,
+				DAB20D4318042D830030623F /* MuTextFieldController.m */,
+				DAB20D4418042D830030623F /* MuTextFieldController.xib */,
+				DAB20D4718045AC40030623F /* MuDialogCreator.h */,
+				DABF8CC4180C2C640069CB6D /* MuChoiceFieldController.h */,
+				DABF8CC5180C2C640069CB6D /* MuChoiceFieldController.m */,
+				DABF8CC2180C28E60069CB6D /* MuChoiceFieldController.xib */,
 			);
 			name = Classes;
 			sourceTree = "<group>";
@@ -310,6 +328,8 @@
 				DAB9F4BF17F1B24000117D2E /* ic_list.png in Resources */,
 				DAB9F4C017F1B24000117D2E /* ic_magnifying_glass.png in Resources */,
 				DAB9F4C217F1CB6D00117D2E /* ic_reflow.png in Resources */,
+				DAB20D4618042D830030623F /* MuTextFieldController.xib in Resources */,
+				DABF8CC3180C28E60069CB6D /* MuChoiceFieldController.xib in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -354,6 +374,8 @@
 				DA1C68C417E8969C0061F586 /* common.m in Sources */,
 				DABDEF5A17EC484A00AC35F1 /* MuDocRef.m in Sources */,
 				DAAC6A2E17FC6E4A00A0E83A /* MuTapResult.m in Sources */,
+				DAB20D4518042D830030623F /* MuTextFieldController.m in Sources */,
+				DABF8CC6180C2C650069CB6D /* MuChoiceFieldController.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
