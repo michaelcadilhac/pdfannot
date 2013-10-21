@@ -324,6 +324,19 @@
 				android:textAppearance="?android:attr/textAppearanceMedium" />
 
 			<ImageButton
+				android:id="@+id/paletteButton"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content"
+				android:layout_centerVertical="true"
+				android:layout_alignParentRight="true"
+				android:contentDescription="@string/palette"
+				android:background="@drawable/button"
+				android:layout_toLeftOf="@+id/acceptButton"
+				android:onClick="OnAcceptButtonClick"
+				android:visibility="2"
+				android:src="@drawable/ic_palette" />
+
+			<ImageButton
 				android:id="@+id/acceptButton"
 				android:layout_width="wrap_content"
 				android:layout_height="wrap_content"

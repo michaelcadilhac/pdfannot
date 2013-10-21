@@ -66,6 +66,7 @@ public class MuPDFActivity extends Activity implements FilePicker.FilePickerSupp
 	private ImageButton	mMoreButton;
 	private TextView     mAnnotTypeText;
 	private ImageButton mAnnotButton;
+	private ImageButton mPaletteButton;
 	private ViewAnimator mTopBarSwitcher;
 	private ImageButton  mLinkButton;
 	private TopBarMode   mTopBarMode = TopBarMode.Main;
@@ -855,6 +856,7 @@ public class MuPDFActivity extends Activity implements FilePicker.FilePickerSupp
 		mSearchText = (EditText)mButtonsView.findViewById(R.id.searchText);
 		mLinkButton = (ImageButton)mButtonsView.findViewById(R.id.linkButton);
 		mMoreButton = (ImageButton)mButtonsView.findViewById(R.id.moreButton);
+		mPaletteButton = (ImageButton)mButtonsView.findViewById(R.id.paletteButton);
 		mTopBarSwitcher.setVisibility(View.INVISIBLE);
 		mPageNumberView.setVisibility(View.INVISIBLE);
 		mInfoView.setVisibility(View.INVISIBLE);
@@ -876,6 +878,7 @@ public class MuPDFActivity extends Activity implements FilePicker.FilePickerSupp
 	}
 
 	public void OnCopyTextButtonClick(View v) {
+		mPaletteButton.setVisibility (View.GONE);
 		mTopBarMode = TopBarMode.Accept;
 		mTopBarSwitcher.setDisplayedChild(mTopBarMode.ordinal());
 		mAcceptMode = AcceptMode.CopyText;
@@ -895,6 +898,7 @@ public class MuPDFActivity extends Activity implements FilePicker.FilePickerSupp
 	}
 
 	public void OnHighlightButtonClick(View v) {
+		mPaletteButton.setVisibility (View.VISIBLE);
 		mTopBarMode = TopBarMode.Accept;
 		mTopBarSwitcher.setDisplayedChild(mTopBarMode.ordinal());
 		mAcceptMode = AcceptMode.Highlight;
@@ -904,6 +908,7 @@ public class MuPDFActivity extends Activity implements FilePicker.FilePickerSupp
 	}
 
 	public void OnUnderlineButtonClick(View v) {
+		mPaletteButton.setVisibility (View.VISIBLE);
 		mTopBarMode = TopBarMode.Accept;
 		mTopBarSwitcher.setDisplayedChild(mTopBarMode.ordinal());
 		mAcceptMode = AcceptMode.Underline;
@@ -913,6 +918,7 @@ public class MuPDFActivity extends Activity implements FilePicker.FilePickerSupp
 	}
 
 	public void OnStrikeOutButtonClick(View v) {
+		mPaletteButton.setVisibility (View.VISIBLE);
 		mTopBarMode = TopBarMode.Accept;
 		mTopBarSwitcher.setDisplayedChild(mTopBarMode.ordinal());
 		mAcceptMode = AcceptMode.StrikeOut;
@@ -922,6 +928,7 @@ public class MuPDFActivity extends Activity implements FilePicker.FilePickerSupp
 	}
 
 	public void OnInkButtonClick(View v) {
+		mPaletteButton.setVisibility (View.VISIBLE);
 		mTopBarMode = TopBarMode.Accept;
 		mTopBarSwitcher.setDisplayedChild(mTopBarMode.ordinal());
 		mAcceptMode = AcceptMode.Ink;
