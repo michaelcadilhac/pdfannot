@@ -1330,6 +1330,39 @@ fz_device *pdf_new_pdf_device(pdf_document *doc, pdf_obj *contents, pdf_obj *res
 	return dev;
 }
 
+fz_device *pdf_new_appending_pdf_device(pdf_document *doc, pdf_obj *contents, pdf_obj *resources, const fz_matrix *ctm)
+{
+	fz_device *dev = pdf_new_pdf_device(doc, contents, resources, ctm);
+	pdf_device *pdev = dev->user;
+	fz_context *ctx = pdev->ctx;
+	gstate *gs = CURRENT_GSTATE(pdev);
+
+	fz_buffer *oldbuf = (pdf_get_xref_entry (doc, pdf_to_num(contents)))->stm_buf;
+
+	if (oldbuf)
+	{
+		fz_drop_buffer (ctx, gs->buf);
+		gs->buf = fz_keep_buffer (ctx, oldbuf);
+	}
+
+	// Populate XObjects
+	pdf_obj *xobjs = pdf_dict_gets (resources, "XObject");
+	int i = pdf_dict_len (xobjs);
+	while (i--)
+	{
+		const char* key = pdf_to_name(pdf_dict_get_key (xobjs, i));
+		if (key[0] == 'F' && key[1] == 'm')
+		{
+			int v = atoi (key + 2);
+			if (v >= pdev->num_forms)
+				pdev->num_forms = v + 1;
+		}
+	}
+
+	// FIXME: Populate other objets.
+	return dev;
+}
+
 fz_device *pdf_page_write(pdf_document *doc, pdf_page *page)
 {
 	fz_context *ctx = doc->ctx;

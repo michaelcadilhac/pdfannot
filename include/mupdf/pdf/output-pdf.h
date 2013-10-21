@@ -8,6 +8,8 @@
 */
 fz_device *pdf_new_pdf_device(pdf_document *doc, pdf_obj *contents, pdf_obj *resources, const fz_matrix *ctm);
 
+fz_device *pdf_new_appending_pdf_device(pdf_document *doc, pdf_obj *contents, pdf_obj *resources, const fz_matrix *ctm);
+
 /*
 	pdf_write_document: Write out the document to a file with all changes finalised.
 */
