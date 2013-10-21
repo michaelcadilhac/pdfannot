@@ -1603,6 +1603,7 @@ void pdf_update_ink_appearance(pdf_document *doc, pdf_annot *annot)
 		path = fz_new_path(ctx);
 		stroke = fz_new_stroke_state(ctx);
 		stroke->linewidth = width;
+		stroke->linecap = FZ_LINECAP_ROUND;
 
 		for (i = 0; i < n; i ++)
 		{
