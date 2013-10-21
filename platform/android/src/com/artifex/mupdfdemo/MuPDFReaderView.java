@@ -149,6 +149,9 @@ public class MuPDFReaderView extends ReaderView {
 					touch_start(x, y);
 					break;
 				case MotionEvent.ACTION_MOVE:
+					final int historySize = event.getHistorySize();
+					for (int h = 0; h < historySize; h++)
+						touch_move(event.getHistoricalX(h), event.getHistoricalY(h));
 					touch_move(x, y);
 					break;
 				case MotionEvent.ACTION_UP:
@@ -164,7 +167,7 @@ public class MuPDFReaderView extends ReaderView {
 
 		return super.onTouchEvent(event);
 	}
-
+  
 	private float mX, mY;
 
 	private static final float TOUCH_TOLERANCE = 2;
