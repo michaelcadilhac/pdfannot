@@ -1580,6 +1580,7 @@ void pdf_update_ink_appearance(pdf_document *doc, pdf_annot *annot)
 		float width;
 		pdf_obj *list;
 		int n, m, i, j;
+		int empty = 1;
 
 		cs = pdf_to_color(doc, pdf_dict_gets(annot->obj, "C"), color);
 		if (!cs)
@@ -1620,6 +1621,7 @@ void pdf_update_ink_appearance(pdf_document *doc, pdf_annot *annot)
 
 				if (i == 0 && j == 0)
 				{
+					empty = 0;
 					rect.x0 = rect.x1 = pt.x;
 					rect.y0 = rect.y1 = pt.y;
 				}
@@ -1639,7 +1641,14 @@ void pdf_update_ink_appearance(pdf_document *doc, pdf_annot *annot)
 
 		fz_stroke_path(dev, path, stroke, page_ctm, cs, color, 1.0f);
 
-		fz_expand_rect(&rect, width);
+		// Do not use fz_expand_rect as it would not expand single-point rects.
+		if (!empty)
+		{
+			rect.x0 -= width;
+			rect.y0 -= width;
+			rect.x1 += width;
+			rect.y1 += width;
+		}
 
 		fz_transform_rect(&rect, page_ctm);
 		pdf_set_annot_appearance(doc, annot, &rect, strike_list);

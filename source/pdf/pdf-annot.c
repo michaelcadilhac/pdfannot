@@ -886,6 +886,7 @@ pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *
 	pdf_obj *bs, *col;
 	fz_rect rect;
 	int i, k = 0;
+	int empty = 1;
 
 	fz_invert_matrix(&ctm, &annot->page->ctm);
 
@@ -906,6 +907,7 @@ pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *
 
 			if (i == 0 && j == 0)
 			{
+				empty = 0;
 				rect.x0 = rect.x1 = pt.x;
 				rect.y0 = rect.y1 = pt.y;
 			}
@@ -920,7 +922,14 @@ pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *
 		}
 	}
 
-	fz_expand_rect(&rect, thickness);
+	// Do not use fz_expand_rect as it would not expand single-point rects.
+	if (!empty)
+	{
+		rect.x0 -= thickness;
+		rect.y0 -= thickness;
+		rect.x1 += thickness;
+		rect.y1 += thickness;
+	}
 	pdf_dict_puts_drop(annot->obj, "Rect", pdf_new_rect(doc, &rect));
 	update_rect(ctx, annot);
 
