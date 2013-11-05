@@ -654,10 +654,7 @@ public abstract class PageView extends ViewGroup {
 			mDrawEntire = null;
 		}
 
-		if (mDrawPatch != null) {
-			mDrawPatch.cancel(true);
-			mDrawPatch = null;
-		}
+		removeHq();
 
 		// Render the page in the background
 		mDrawEntire = new AsyncTask<Void,Void,Void>() {
