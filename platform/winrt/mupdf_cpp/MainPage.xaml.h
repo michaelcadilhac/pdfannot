@@ -33,6 +33,14 @@ using namespace Windows::UI::Xaml::Navigation;
 using namespace Windows::ApplicationModel;
 using namespace mupdfwinrt;
 
+using namespace Windows::Graphics::Display;
+using namespace Windows::Graphics::Printing;
+using namespace Windows::UI;
+using namespace Windows::UI::Text;
+using namespace Windows::UI::Xaml::Documents;
+using namespace Windows::Graphics::Printing::OptionDetails;
+using namespace Windows::UI::Xaml::Printing;
+
 typedef enum
 {
 	StatusMessage,
@@ -54,6 +62,55 @@ typedef struct spatial_info_s
 
 namespace mupdf_cpp
 {
+
+	class PageRangeException
+	{
+	private:
+		std::wstring m_message;
+	public:
+		PageRangeException(std::wstring &message)
+		{
+			m_message = message;
+		}
+		~PageRangeException()
+		{
+		}
+		std::wstring get_DisplayMessage()
+		{
+			return m_message;
+		}
+	};
+
+	public value class PrintPageDesc
+	{
+	public:
+		Size margin;
+		Size pagesize;
+		Size printpagesize;
+		Size resolution;
+
+		friend bool operator == (PrintPageDesc pp1, PrintPageDesc pp2)
+		{
+			bool equal = (std::abs(pp1.pagesize.Width - pp2.pagesize.Width) < FLT_EPSILON) &&
+							(std::abs(pp1.pagesize.Height - pp2.pagesize.Height) < FLT_EPSILON);
+			if (equal)
+			{
+				equal = (std::abs(pp1.printpagesize.Width - pp2.printpagesize.Width) < FLT_EPSILON) &&
+						(std::abs(pp1.printpagesize.Height - pp2.printpagesize.Height) < FLT_EPSILON);
+			}
+			if (equal)
+			{
+				equal = (std::abs(pp1.resolution.Width - pp2.resolution.Width) < FLT_EPSILON) &&
+						(std::abs(pp1.resolution.Height - pp2.resolution.Height) < FLT_EPSILON);
+			}
+			return equal;
+		}
+		friend bool operator != (PrintPageDesc pp1, PrintPageDesc pp2)
+		{
+			return !(pp1 == pp2);
+		}
+	};
+
 	/// <summary>
 	/// An empty page that can be used on its own or navigated to within a Frame.
 	/// </summary>
@@ -73,10 +130,18 @@ namespace mupdf_cpp
 			Windows::ApplicationModel::Activation::FileActivatedEventArgs^ get() { return _fileEventArgs; }
 			void set(Windows::ApplicationModel::Activation::FileActivatedEventArgs^ value) { _fileEventArgs = value; }
 		}
+		void NotifyUser(String^ strMessage, int type);
 
 	protected:
 		virtual void OnNavigatedTo(Windows::UI::Xaml::Navigation::NavigationEventArgs^ e) override;
 		virtual void OnKeyDown(Windows::UI::Xaml::Input::KeyRoutedEventArgs^ e) override;
+		property Windows::Graphics::Printing::IPrintDocumentSource^ PrintDocumentSource
+		{
+			Windows::Graphics::Printing::IPrintDocumentSource^ get()
+			{
+				return m_printdoc_source;
+			}
+		}
 
 	private:
 		Windows::Foundation::EventRegistrationToken _pageLoadedHandlerToken;
@@ -109,10 +174,23 @@ namespace mupdf_cpp
 		bool m_insearch;		/* Used for UI display */
 		bool m_search_active;  /* Used to avoid multiple UI clicks */
 		bool m_sliderchange;
-		bool m_update_flip;
 		double m_Progress;
+		double m_doczoom;
 
-		void ReplaceImage(int page_num, InMemoryRandomAccessStream^ ras, Point ras_size);
+		/* Print related */
+		Vector<DocumentPage^>^ m_printpages;
+		concurrency::critical_section m_printlock;
+		EventRegistrationToken m_printTaskRequestedEventToken;
+		PrintDocument^ m_printdoc;
+		IPrintDocumentSource^  m_printdoc_source;
+		LONGLONG m_requestCount;
+		PrintPageDesc m_printpagedesc;
+		int m_printresolution;
+		bool m_printcrop;
+		bool m_pageRangeEditVisible;
+		std::vector<int> m_ppage_num_list;
+
+		void ReplaceImage(int page_num, InMemoryRandomAccessStream^ ras, Point ras_size, double zoom);
 		void Picker(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void Searcher(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void OpenDocumentPrep(StorageFile^ file);
@@ -120,13 +198,11 @@ namespace mupdf_cpp
 		void InitialRender();
 		void RenderRange(int curr_page);
 		void CleanUp();
-		void UpdatePage(int page_num, InMemoryRandomAccessStream^ ras, Point ras_size, Page_Content_t content_type);
+		void UpdatePage(int page_num, InMemoryRandomAccessStream^ ras, Point ras_size, Page_Content_t content_type, double zoom);
 		void CreateBlank(int width, int height);
 		void HandleFileNotFoundException(Platform::COMException^ e);
 		void NotifyUserFileNotExist();
 		void SetFlipView();
-		void Slider_ValueChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs^ e);
-		void Slider_Released(Platform::Object^ sender, Windows::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs^ e);
 		void FlipView_SelectionChanged(Object^ sender, SelectionChangedEventArgs^ e);
 		void SearchNext(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void SearchPrev(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
@@ -156,7 +232,6 @@ namespace mupdf_cpp
 		void topAppBar_Loaded(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void UpdateAppBarButtonViewState();
 		bool EnsureUnsnapped();
-		void NotifyUser(String^ strMessage, NotifyType_t type);
 		void ExitInvokedHandler(Windows::UI::Popups::IUICommand^ command);
 		void OKInvokedHandler(Windows::UI::Popups::IUICommand^ command);
 		Point ComputePageSize(spatial_info_t spatial_info, int page_num);
@@ -165,6 +240,7 @@ namespace mupdf_cpp
 		void SearchProgress(IAsyncOperationWithProgress<int, double>^ operation, double status);
 		void PasswordOK(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void App_Suspending(Object^ sender, SuspendingEventArgs^ e);
+		void ExceptionHandler(Object^ sender, UnhandledExceptionEventArgs^ e);
 		void ZoomInPress(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void ZoomOutPress(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void NonTouchZoom(int zoom);
@@ -173,5 +249,27 @@ namespace mupdf_cpp
 		void Page_Loaded(Object^ sender, RoutedEventArgs^ e);
 		Windows::ApplicationModel::Activation::ProtocolActivatedEventArgs^ _protocolEventArgs;
 		Windows::ApplicationModel::Activation::FileActivatedEventArgs^ _fileEventArgs;
+		void Slider_ValueChanged(Platform::Object^ sender, Windows::UI::Xaml::Input::PointerRoutedEventArgs^ e);
+		void Slider_Key(Platform::Object^ sender, Windows::UI::Xaml::Input::KeyRoutedEventArgs^ e);
+		void Slider_Common();
+		void FlipView_Started(Platform::Object^ sender, Windows::UI::Xaml::Input::ManipulationStartedRoutedEventArgs^ e);
+		void UpdateZoom(int page_num, bool ignore_curr);
+
+		/* Print Related */
+		void RegisterForPrinting();
+		void UnregisterForPrinting();
+		void PrintTaskRequested(PrintManager^ sender, PrintTaskRequestedEventArgs^ e);
+		void ClearPrintCollection();
+		void CreatePrintPreviewPages(Object^ sender, PaginateEventArgs^ e);
+		void GetPrintPreviewPages(Object^ sender, GetPreviewPageEventArgs^ e);
+		void UpdatePreview(int page_num, InMemoryRandomAccessStream^ ras, 
+						   Point ras_size, Page_Content_t content_type, double zoom_in);
+		void CleanUpPreview(int new_page);
+		void AddPrintPages(Object^ sender, AddPagesEventArgs^ e);
+		void PrintOptionsChanged(PrintTaskOptionDetails^ sender, PrintTaskOptionChangedEventArgs^ args);
+		void RefreshPreview();
+		void RemovePageRangeEdit(PrintTaskOptionDetails^ printTaskOptionDetails);
+		void SplitString(String^ string, wchar_t delimiter, std::vector<std::wstring>& words);
+		void GetPagesInRange(String^ pageRange);
 	};
 }
