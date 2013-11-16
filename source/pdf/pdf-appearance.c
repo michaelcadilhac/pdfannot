@@ -1577,8 +1577,9 @@ void pdf_update_ink_appearance(pdf_document *doc, pdf_annot *annot)
 	{
 		fz_rect rect = fz_empty_rect;
 		float color[4];
+		float alpha;
 		float width;
-		pdf_obj *list;
+		pdf_obj *list, *alphaobj;
 		int n, m, i, j;
 		int empty = 1;
 
@@ -1590,6 +1591,12 @@ void pdf_update_ink_appearance(pdf_document *doc, pdf_annot *annot)
 			color[1] = 0.0f;
 			color[2] = 0.0f;
 		}
+
+		alphaobj = pdf_dict_gets(annot->obj, "CA");
+		if (!alphaobj)
+			alpha = 1.0f;
+		else
+			alpha = pdf_to_real (alphaobj);
 
 		width = pdf_to_real(pdf_dict_gets(pdf_dict_gets(annot->obj, "BS"), "W"));
 		if (width == 0.0f)
@@ -1639,7 +1646,7 @@ void pdf_update_ink_appearance(pdf_document *doc, pdf_annot *annot)
 			fz_lineto(ctx, path, pt_last.x, pt_last.y);
 		}
 
-		fz_stroke_path(dev, path, stroke, page_ctm, cs, color, 1.0f);
+		fz_stroke_path(dev, path, stroke, page_ctm, cs, color, alpha);
 
 		// Do not use fz_expand_rect as it would not expand single-point rects.
 		if (!empty)

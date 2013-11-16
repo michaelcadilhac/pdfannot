@@ -753,10 +753,19 @@ pdf_create_annot(pdf_document *doc, pdf_page *page, fz_annot_type type)
 
 		/*
 			Linking must be done after any call that might throw because
-			pdf_free_annot below actually frees a list
+			pdf_free_annot below actually frees a list.  Also, we put the new annot
+		  at the end of the list, as it should be the last drawn.
 		*/
-		annot->next = page->annots;
-		page->annots = annot;
+		if (page->annots)
+		{
+			pdf_annot *annotptr = page->annots;
+
+			while (annotptr->next)
+				annotptr = annotptr->next;
+			annotptr->next = annot;
+		}
+		else
+			page->annots = annot;
 
 		doc->dirty = 1;
 	}
@@ -878,7 +887,7 @@ static void update_rect(fz_context *ctx, pdf_annot *annot)
 }
 
 void
-pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float thickness)
+pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float alpha, float thickness)
 {
 	fz_context *ctx = doc->ctx;
 	fz_matrix ctm;
@@ -941,6 +950,8 @@ pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *
 	pdf_dict_puts_drop(annot->obj, "C", col);
 	for (i = 0; i < 3; i++)
 		pdf_array_push_drop(col, pdf_new_real(doc, color[i]));
+
+	pdf_dict_puts_drop(annot->obj, "CA", pdf_new_real (doc, alpha));
 }
 
 static void find_free_font_name(pdf_obj *fdict, char *buf, int buf_size)

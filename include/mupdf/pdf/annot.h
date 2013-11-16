@@ -89,7 +89,7 @@ void pdf_set_markup_annot_quadpoints(pdf_document *doc, pdf_annot *annot, fz_poi
 	pdf_set_ink_annot_list: set the details of an ink annotation. All the points of the multiple arcs
 	are carried in a single array, with the counts for each arc held in a secondary array.
 */
-void pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float thickness);
+void pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *counts, int ncount, float color[3], float alpha, float thickness);
 
 /*
 	pdf_set_free_text_details: set the position, text, font and color for a free text annotation.
