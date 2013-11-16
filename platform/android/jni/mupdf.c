@@ -1474,7 +1474,7 @@ JNI_FN(MuPDFCore_addMarkupAnnotationInternal)(JNIEnv * env, jobject thiz, jobjec
 }
 
 JNIEXPORT void JNICALL
-JNI_FN(MuPDFCore_addInkAnnotationInternal)(JNIEnv * env, jobject thiz, jobjectArray arcs)
+JNI_FN(MuPDFCore_addInkAnnotationInternal)(JNIEnv * env, jobject thiz, jobjectArray arcs, int inkColor, int inkAlpha, float strokeWidth)
 {
 	globals *glo = get_globals(env, thiz);
 	fz_context *ctx = glo->ctx;
@@ -1488,13 +1488,17 @@ JNI_FN(MuPDFCore_addInkAnnotationInternal)(JNIEnv * env, jobject thiz, jobjectAr
 	int *counts = NULL;
 	int total = 0;
 	float color[3];
+	float alpha;
 
 	if (idoc == NULL)
 		return;
 
-	color[0] = 1.0;
-	color[1] = 0.0;
-	color[2] = 0.0;
+	alpha = inkAlpha / 255.0f;
+	if (alpha > 1.0f)
+		alpha = 1.0f;
+	color[0] = ((inkColor >> 16) & 0xFF) / 255.0f;
+	color[1] = ((inkColor >> 8) & 0xFF) / 255.0f;
+	color[2] = (inkColor & 0xFF) / 255.0f;
 
 	fz_var(pts);
 	fz_var(counts);
@@ -1549,7 +1553,7 @@ JNI_FN(MuPDFCore_addInkAnnotationInternal)(JNIEnv * env, jobject thiz, jobjectAr
 
 		annot = (fz_annot *)pdf_create_annot(idoc, (pdf_page *)pc->page, FZ_ANNOT_INK);
 
-		pdf_set_ink_annot_list(idoc, (pdf_annot *)annot, pts, counts, n, color, INK_THICKNESS);
+		pdf_set_ink_annot_list(idoc, (pdf_annot *)annot, pts, counts, n, color, alpha, strokeWidth);
 
 		dump_annotation_display_lists(glo);
 	}

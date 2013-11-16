@@ -16,6 +16,7 @@ import android.view.LayoutInflater;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
+import android.content.SharedPreferences;
 
 /* This enum should be kept in line with the cooresponding C enum in mupdf.c */
 enum SignatureState {
@@ -530,7 +531,10 @@ public class MuPDFPageView extends PageView implements MuPDFView {
 		mAddInk = new AsyncTask<PointF[][],Void,Void>() {
 			@Override
 			protected Void doInBackground(PointF[][]... params) {
-				mCore.addInkAnnotation(mPageNumber, params[0]);
+				SharedPreferences pref = mContext.getSharedPreferences ("ink", 0);
+				int color = pref.getInt ("color", 0xFF000000);
+				float strokeWidth = pref.getFloat ("stroke_width", 10.f);
+				mCore.addInkAnnotation(mPageNumber, params[0], color, strokeWidth * 0.8f);
 				return null;
 			}
 

@@ -20,6 +20,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
+import android.content.SharedPreferences;
 
 class PatchInfo {
 	public Point patchViewSize;
@@ -102,8 +103,6 @@ public abstract class PageView extends ViewGroup {
 	private static final int HIGHLIGHT_COLOR = 0x802572AC;
 	private static final int LINK_COLOR = 0x80AC7225;
 	private static final int BOX_COLOR = 0xFF4444FF;
-	private static final int INK_COLOR = 0xFFFF0000;
-	private static final float INK_THICKNESS = 10.0f;
 	private static final int BACKGROUND_COLOR = 0xFFFFFFFF;
 	private static final int PROGRESS_DIALOG_DELAY = 200;
 	protected final Context   mContext;
@@ -367,14 +366,18 @@ public abstract class PageView extends ViewGroup {
 						Path path = new Path();
 						PointF p;
 
+						SharedPreferences pref = mContext.getSharedPreferences ("ink", 0);
+						int color = pref.getInt ("color", 0xFF000000);
+						float strokeWidth = pref.getFloat ("stroke_width", 10.f);
+
 						paint.setAntiAlias(true);
 						paint.setDither(true);
 						paint.setStrokeJoin(Paint.Join.ROUND);
 						paint.setStrokeCap(Paint.Cap.ROUND);
 
 						paint.setStyle(Paint.Style.STROKE);
-						paint.setStrokeWidth(INK_THICKNESS * scale);
-						paint.setColor(INK_COLOR);
+						paint.setStrokeWidth(strokeWidth * scale);
+						paint.setColor(color);
 
 						Iterator<ArrayList<PointF>> it = mDrawing.iterator();
 						while (it.hasNext()) {
@@ -398,7 +401,7 @@ public abstract class PageView extends ViewGroup {
 							  p = arc.get(0);
 								paint.setStyle(Paint.Style.FILL);
 								canvas.drawCircle (p.x * scale, p.y * scale,
-										   INK_THICKNESS * scale / 2, paint);
+										   strokeWidth * scale / 2, paint);
 								paint.setStyle(Paint.Style.STROKE);
 							}
 						}
