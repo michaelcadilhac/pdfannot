@@ -1624,6 +1624,7 @@ void pdf_update_ink_appearance(pdf_document *doc, pdf_annot *annot)
 					empty = 0;
 					rect.x0 = rect.x1 = pt.x;
 					rect.y0 = rect.y1 = pt.y;
+					empty = 0;
 				}
 				else
 				{

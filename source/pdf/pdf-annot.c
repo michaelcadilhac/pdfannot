@@ -491,20 +491,19 @@ static const char *annot_type_str(fz_annot_type type)
 	}
 }
 
-pdf_annot *
-pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
+void
+pdf_load_annots(pdf_document *doc, pdf_page *page, pdf_obj *annots)
 {
-	pdf_annot *annot, *head, **itr;
+	pdf_annot *annot, **itr;
 	pdf_obj *obj, *ap, *as, *n, *rect;
 	int i, len, keep_annot;
 	fz_context *ctx = doc->ctx;
 
 	fz_var(annot);
 	fz_var(itr);
-	fz_var(head);
 	fz_var(keep_annot);
 
-	head = NULL;
+	itr = &page->annots;
 
 	len = pdf_array_len(annots);
 	/*
@@ -515,7 +514,6 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 	*/
 	fz_try(ctx)
 	{
-		itr = &head;
 		for (i = 0; i < len; i++)
 		{
 			obj = pdf_array_get(annots, i);
@@ -530,7 +528,8 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 	}
 	fz_catch(ctx)
 	{
-		pdf_free_annot(ctx, head);
+		pdf_free_annot(ctx, page->annots);
+		page->annots = NULL;
 		fz_rethrow(ctx);
 	}
 
@@ -538,7 +537,7 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 	Iterate through the newly created annot linked list, using a double pointer to
 	facilitate deleting broken annotations.
 	*/
-	itr = &head;
+	itr = &page->annots;
 	while (*itr)
 	{
 		annot = *itr;
@@ -602,7 +601,8 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 		{
 			if (fz_caught(ctx) == FZ_ERROR_TRYLATER)
 			{
-				pdf_free_annot(ctx, head);
+				pdf_free_annot(ctx, page->annots);
+				page->annots = NULL;
 				fz_rethrow(ctx);
 			}
 			keep_annot = 0;
@@ -617,7 +617,7 @@ pdf_load_annots(pdf_document *doc, pdf_obj *annots, pdf_page *page)
 		}
 	}
 
-	return head;
+	page->annot_tailp = itr;
 }
 
 void
@@ -753,10 +753,11 @@ pdf_create_annot(pdf_document *doc, pdf_page *page, fz_annot_type type)
 
 		/*
 			Linking must be done after any call that might throw because
-			pdf_free_annot below actually frees a list
+			pdf_free_annot below actually frees a list. Put the new annot
+			at the end of the list, so that it will be drawn last.
 		*/
-		annot->next = page->annots;
-		page->annots = annot;
+		*page->annot_tailp = annot;
+		page->annot_tailp = &annot->next;
 
 		doc->dirty = 1;
 	}
@@ -797,6 +798,9 @@ pdf_delete_annot(pdf_document *doc, pdf_page *page, pdf_annot *annot)
 		return;
 
 	*annotptr = annot->next;
+	/* If the removed annotation was the last in the list adjust the end pointer */
+	if (*annotptr == NULL)
+		page->annot_tailp = annotptr;
 
 	/* Stick it in the deleted list */
 	annot->next = page->deleted_annots;
@@ -922,14 +926,19 @@ pdf_set_ink_annot_list(pdf_document *doc, pdf_annot *annot, fz_point *pts, int *
 		}
 	}
 
-	// Do not use fz_expand_rect as it would not expand single-point rects.
-	if (!empty)
+	/*
+		Expand the rectangle by thickness all around. We cannot use
+		fz_expand_rect because the rectangle might be empty in the
+		single point case
+	*/
+	if (k > 0)
 	{
 		rect.x0 -= thickness;
 		rect.y0 -= thickness;
 		rect.x1 += thickness;
 		rect.y1 += thickness;
 	}
+
 	pdf_dict_puts_drop(annot->obj, "Rect", pdf_new_rect(doc, &rect));
 	update_rect(ctx, annot);
 

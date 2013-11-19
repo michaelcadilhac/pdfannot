@@ -9,7 +9,6 @@
 #include <sstream>
 
 #define LOOK_AHEAD 1 /* A +/- count on the pages to pre-render */
-#define LOOK_AHEAD_SCALE 2 /* A +/- count on the pages to adjust for scale change */
 #define THUMB_PREADD 10
 #define MIN_SCALE 0.5
 
@@ -92,16 +91,55 @@ MainPage::MainPage()
 	m_linkcolor="#40AC7225";
 	mu_doc = nullptr;
 	m_docPages = ref new Platform::Collections::Vector<DocumentPage^>();
-	m_printpages = ref new Platform::Collections::Vector<DocumentPage^>();
 	m_thumbnails = ref new Platform::Collections::Vector<DocumentPage^>();
 	m_page_link_list = ref new Platform::Collections::Vector<IVector<RectList^>^>();
 	m_text_list = ref new Platform::Collections::Vector<RectList^>();
 	m_linkset = ref new Platform::Collections::Vector<int>();
+
+	SetUpDirectX();
 	RegisterForPrinting();
 	CleanUp();
 	RecordMainThread();
 	/* So that we can catch special loading events (e.g. open with) */
 	_pageLoadedHandlerToken = Loaded += ref new RoutedEventHandler(this, &MainPage::Page_Loaded);
+}
+
+/* You need a Direct3D device to create a Direct2D device.   This gets stuff
+	set up for Direct2D printing support */
+void MainPage::SetUpDirectX()
+{
+	UINT creation_flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+	ComPtr<IDXGIDevice> dxgi_device;
+	D2D1_FACTORY_OPTIONS options;
+	ZeroMemory(&options, sizeof(D2D1_FACTORY_OPTIONS));
+	D3D_FEATURE_LEVEL feature_levels[] =
+	{
+		D3D_FEATURE_LEVEL_11_1,
+		D3D_FEATURE_LEVEL_11_0,
+		D3D_FEATURE_LEVEL_10_1,
+		D3D_FEATURE_LEVEL_10_0,
+		D3D_FEATURE_LEVEL_9_3,
+		D3D_FEATURE_LEVEL_9_2,
+		D3D_FEATURE_LEVEL_9_1
+	};
+	ComPtr<ID3D11Device> device;
+	ComPtr<ID3D11DeviceContext> context;
+
+#if defined(_DEBUG)
+	options.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
+#endif	
+
+	ThrowIfFailed(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, 0, 
+				creation_flags, feature_levels, ARRAYSIZE(feature_levels),
+				D3D11_SDK_VERSION, &device, &m_featureLevel, &context));
+	ThrowIfFailed(device.As(&m_d3d_device));
+	ThrowIfFailed(context.As(&m_d3d_context));
+	ThrowIfFailed(m_d3d_device.As(&dxgi_device));
+	ThrowIfFailed(D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED,
+					__uuidof(ID2D1Factory1), &options, &m_d2d_factory));
+	ThrowIfFailed(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+						CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&m_wic_factory)));
+	m_d2d_factory->CreateDevice(dxgi_device.Get(), &m_d2d_device);
 }
 
 /* Used during launch of application from file */
@@ -144,7 +182,7 @@ void MainPage::ExceptionHandler(Object^ sender, UnhandledExceptionEventArgs^ e)
 	else
 	{
 		e->Handled = true;
-		NotifyUser("A error was encountered", ErrorMessage);
+		NotifyUser("An error was encountered", ErrorMessage);
 	}
 }
 
@@ -215,6 +253,17 @@ void MainPage::Picker(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventAr
 	if (!EnsureUnsnapped())
 		return;
 
+	/* If we are actively rendering a document to the print thread then notify the
+	   user that they will need to wait */
+	if (m_print_active) 
+	{
+		int total_pages = GetPrintPageCount();
+		auto str1 = "Cannot open new file.  Currently rendering page " + 
+					m_curr_print_count + " of " + total_pages + " for print queue";
+		NotifyUser(str1, StatusMessage);
+		return;
+	}
+
 	FileOpenPicker^ openPicker = ref new FileOpenPicker();
 	openPicker->ViewMode = PickerViewMode::List;
 	openPicker->SuggestedStartLocation = PickerLocationId::DocumentsLibrary;
@@ -259,7 +308,7 @@ void MainPage::UpdatePage(int page_num, InMemoryRandomAccessStream^ ras,
 		doc_page->Width = ras_size.X;
 	}
 	doc_page->Content = content_type;
-	doc_page->Zoom = zoom_in;
+	doc_page->PageZoom = zoom_in;
 
 	/* We do not want flipview change notification to occur for ourselves */
 	m_page_update = true;
@@ -281,7 +330,7 @@ void MainPage::ReplaceImage(int page_num, InMemoryRandomAccessStream^ ras,
 
 	doc_page->Height = ras_size.Y;
 	doc_page->Width = ras_size.X;
-	doc_page->Zoom = page_zoom;
+	doc_page->PageZoom = page_zoom;
 }
 
 Point MainPage::ComputePageSize(spatial_info_t spatial_info, int page_num)
@@ -408,7 +457,7 @@ void MainPage::CreateBlank(int width, int height)
 
 	DataWriterStoreOperation^ result = dw->StoreAsync();
 	/* Block on the Async call */
-	while(result->Status != AsyncStatus::Completed) {
+	while(result->Status != Windows::Foundation::AsyncStatus::Completed) {
 	}
 	/* And store in a the image brush */
 	bmp->SetSource(ras);
@@ -438,8 +487,6 @@ void MainPage::CleanUp()
 		m_docPages->Clear();
 	if (m_thumbnails != nullptr && m_thumbnails->Size > 0)
 		m_thumbnails->Clear();
-	if (m_printpages != nullptr && m_printpages->Size > 0)
-		m_printpages->Clear();
 	/* With the ref counting this should not leak */
 	if (m_page_link_list != nullptr && m_page_link_list->Size > 0)
 		m_page_link_list->Clear();
@@ -474,6 +521,8 @@ void MainPage::CleanUp()
 	m_rectlist_page = -1;
 	m_Progress = 0.0;
 	m_doczoom = 1.0;
+	m_print_active = false;
+	m_curr_print_count = 1;
 
 	this->xaml_PageSlider->Minimum = m_slider_min;
 	this->xaml_PageSlider->Maximum = m_slider_max;
@@ -676,7 +725,6 @@ void MainPage::InitialRender()
 		doc_page->LinkBox = nullptr;
 		m_docPages->Append(doc_page);
 		m_thumbnails->Append(doc_page);
-		m_printpages->Append(doc_page);
 		/* Create empty lists for our links and specify that they have
 			not been computed for these pages */
 		Vector<RectList^>^ temp_link = ref new Vector<RectList^>();
@@ -723,7 +771,6 @@ void MainPage::InitialRender()
 	this->m_init_done = true;
 }
 
-
 void MainPage::RenderRange(int curr_page)
 {
 	/* Render +/- the look ahead from where we are if blank page is present */
@@ -741,16 +788,25 @@ void MainPage::RenderRange(int curr_page)
 			/* Check if page is already rendered */
 			auto doc = this->m_docPages->GetAt(k);
 			if (doc->Content != FULL_RESOLUTION ||
-				doc->Zoom != m_doczoom)
+				doc->PageZoom != m_doczoom)
 			{
 				Point ras_size = ComputePageSize(spatial_info, k);
 				double zoom = m_doczoom;
 				auto render_task =
 					create_task(mu_doc->RenderPageAsync(k, ras_size.X, ras_size.Y, true));
 				
-				render_task.then([this, k, ras_size, zoom] (InMemoryRandomAccessStream^ ras)
+				render_task.then([this, k, ras_size, zoom, curr_page](InMemoryRandomAccessStream^ ras)
 				{
-					UpdatePage(k, ras, ras_size, FULL_RESOLUTION, zoom);
+					Point new_ras_size = ras_size;
+
+					/* This is so that the scroll update will apply the zoom keeping us in-sync.  And
+					   making sure that we can't exceed our limits with keyboard vs touch.  I.e. any
+					   resolution changes must go through the scroll viewer.  It make the upcoming
+					   page appear to come in at its zoom level of 1.0 but it is smoothly scaled to 
+					   the current scale resolution. */
+					new_ras_size.X = new_ras_size.X / zoom;
+					new_ras_size.Y = new_ras_size.Y / zoom;
+					UpdatePage(k, ras, new_ras_size, FULL_RESOLUTION, zoom);
 				}, task_continuation_context::use_current()).then([this, k, curr_page]()
 				{
 					if (k == curr_page && this->m_links_on)
@@ -761,6 +817,11 @@ void MainPage::RenderRange(int curr_page)
 						AddTextCanvas();
 						m_flip_from_searchlink = false;
 					}
+					if (k == curr_page)
+					{
+						m_curr_flipView->UpdateLayout();
+						UpdateZoom();
+					}
 				},task_continuation_context::use_current());
 			}
 			else
@@ -769,7 +830,10 @@ void MainPage::RenderRange(int curr_page)
 				   needed.   Otherwise, we need to wait for the task above to
 				   complete before we add the links. */
 				if (k == curr_page)
+				{
 					curr_page_rendered = false;
+					UpdateZoom();
+				}
 			}
 		}
 	}
@@ -802,13 +866,13 @@ void MainPage::FlipView_SelectionChanged(Object^ sender, SelectionChangedEventAr
 			}
 			else
 			{
-				 /* Make sure to clear any text search */
+				/* Make sure to clear any text search */
 				auto doc_old = this->m_docPages->GetAt(m_currpage);
 				doc_old->TextBox = nullptr;
 			}
 			/* Get the current page */
 			int curr_page = this->m_currpage;
-			UpdateZoom(pos, false);
+			this->m_currpage = pos;
 			this->RenderRange(pos);
 			this->ReleasePages(curr_page, pos);
 		}
@@ -829,41 +893,16 @@ void MainPage::Slider_Key(Platform::Object^ sender, Windows::UI::Xaml::Input::Ke
 
 void MainPage::Slider_Common()
 {
-	if (IsNotStandardView())
+	if (IsNotStandardView() || m_currpage == this->xaml_PageSlider->Value - 1)
 		return;
 
 	int newValue = (int) this->xaml_PageSlider->Value - 1;  /* zero based */
 
 	if (m_init_done && this->xaml_PageSlider->IsEnabled)
 	{
-		/* Make sure to clear any text search */
-		auto doc_old = this->m_docPages->GetAt(m_currpage);
-		doc_old->TextBox = nullptr;
-
-		auto doc = this->m_docPages->GetAt(newValue);
-		if (doc->Content != FULL_RESOLUTION || doc->Zoom != m_doczoom)
-		{
-			spatial_info_t spatial_info = InitSpatial(m_doczoom);
-			Point ras_size = ComputePageSize(spatial_info, newValue);
-			auto render_task =
-				create_task(mu_doc->RenderPageAsync(newValue, ras_size.X, ras_size.Y, true));
-			double zoom = m_doczoom;
-
-			render_task.then([this, newValue, ras_size, zoom] (InMemoryRandomAccessStream^ ras)
-			{
-				UpdatePage(newValue, ras, ras_size, FULL_RESOLUTION, zoom);
-				this->m_currpage = newValue;
-				m_sliderchange = true;
-				this->m_curr_flipView->SelectedIndex = newValue;
-			}, task_continuation_context::use_current());
-		}
-		else
-		{
-			m_sliderchange = true;
-			this->m_curr_flipView->SelectedIndex = newValue;
-		}
-		UpdateZoom(newValue, false);
+		this->m_curr_flipView->SelectedIndex = this->xaml_PageSlider->Value - 1;
 	}
+	return;
 }
 
 /* Search Related Code */
@@ -937,8 +976,8 @@ void MainPage::ShowSearchResults(int page_num, int box_count)
 		rect_item->Width = curr_box->LowerRight.X - curr_box->UpperLeft.X;
 		rect_item->X = curr_box->UpperLeft.X * scale.X;
 		rect_item->Y = curr_box->UpperLeft.Y * scale.Y;
-		rect_item->Width *= (scale.X * doc_page->Zoom);
-		rect_item->Height *= (scale.Y * doc_page->Zoom);
+		rect_item->Width *= (scale.X);
+		rect_item->Height *= (scale.Y);
 		rect_item->Index = k.ToString();
 		m_text_list->Append(rect_item);
 	}
@@ -1106,21 +1145,29 @@ void MainPage::GridSizeChanged()
 		xaml_WebView->Height = height - height_app;
 	}
 
-	UpDatePageSizes();
+	UpDateThumbSizes();
 
 	if (m_num_pages > 0 && old_flip != m_curr_flipView && old_flip != nullptr)
 	{
 		/* If links are on or off, we need to invalidate */
 		ClearLinks();
 		InvalidateLinks();
-		auto doc = this->m_docPages->GetAt(m_currpage);
-		doc->Content = OLD_RESOLUTION; /* To force a rerender */
+
+		/* And force a rerender */
+		for (int k = m_currpage - LOOK_AHEAD; k <= m_currpage + LOOK_AHEAD; k++)
+		{
+			if (k >= 0 && k < m_num_pages)
+			{
+				DocumentPage ^doc = this->m_docPages->GetAt(k);
+				doc->Content = OLD_RESOLUTION;
+			}
+		}
 		this->m_curr_flipView->SelectedIndex = this->m_currpage;
 		FlipView_SelectionChanged(nullptr, nullptr);
 	}
 }
 
-void MainPage::UpDatePageSizes()
+void MainPage::UpDateThumbSizes()
 {
 	/* Reset the thumb view scaling value */
 	if (m_num_pages > 0)
@@ -1134,14 +1181,12 @@ void MainPage::UpDatePageSizes()
 				int curr_height = thumb_page->NativeHeight;
 				int curr_width = thumb_page->NativeWidth;
 
-				double scale_x = (double) curr_height / (double) this->xaml_zoomCanvas->Height;
-				double scale_y = (double) curr_width / (double) this->xaml_zoomCanvas->Width;
+				double scale_x = (double) curr_height / (double) (this->xaml_zoomCanvas->Height);
+				double scale_y = (double) curr_width / (double) (this->xaml_zoomCanvas->Width);
 
 				double min_scale = max(scale_x, scale_y);
 				thumb_page->Height = curr_height * m_doczoom / min_scale;
 				thumb_page->Width = curr_width * m_doczoom / min_scale;
-				thumb_page->NativeHeight = thumb_page->NativeHeight / min_scale;
-				thumb_page->NativeWidth = thumb_page->NativeWidth / min_scale;
 			}
 		}
 	}
@@ -1221,8 +1266,8 @@ void MainPage::AddLinkCanvas()
 				rect_item->Width = curr_link->LowerRight.X - curr_link->UpperLeft.X;
 				rect_item->X = curr_link->UpperLeft.X * scale.X;
 				rect_item->Y = curr_link->UpperLeft.Y * scale.Y;
-				rect_item->Width *= (scale.X * doc_page->Zoom);
-				rect_item->Height *= (scale.Y * doc_page->Zoom);
+				rect_item->Width *= scale.X;
+				rect_item->Height *= scale.Y;
 				rect_item->Type = curr_link->Type;
 				rect_item->Urilink = curr_link->Uri;
 				rect_item->PageNum = curr_link->PageNum;
@@ -1361,8 +1406,6 @@ void MainPage::Reflower(Platform::Object^ sender, Windows::UI::Xaml::RoutedEvent
 		this->m_curr_flipView->IsEnabled = true;
 		this->xaml_PageSlider->IsEnabled = true;
 		xaml_WebView->Visibility = Windows::UI::Xaml::Visibility::Collapsed;
-		xaml_WebView->Opacity = 0.0;
-
 	}
 	else if (this->m_curr_flipView->IsEnabled)
 	{
@@ -1373,7 +1416,6 @@ void MainPage::Reflower(Platform::Object^ sender, Windows::UI::Xaml::RoutedEvent
 		this->xaml_PageSlider->IsEnabled = false;
 		this->xaml_WebView->NavigateToString(html_string);
 		this->xaml_WebView->Height = this->ActualHeight - 2 * this->BottomAppBar->ActualHeight;
-		/* Check if thumb rendering is done.  If not then restart */
 	}
 }
 
@@ -1399,36 +1441,44 @@ void MainPage::UpdateAppBarButtonViewState()
 	VisualStateManager::GoToState(NextSearch, viewState, true);
 }
 
-/* Manipulation zooming with touch input */
+/* Scroll viewer scale changes.  If first time to this page, then we essentially
+   have our scroll setting set at 1.0.   */
 void MainPage::ScrollChanged(Platform::Object^ sender,
 					Windows::UI::Xaml::Controls::ScrollViewerViewChangedEventArgs^ e)
 {
 	ScrollViewer^ scrollviewer = safe_cast<ScrollViewer^> (sender);
 	auto doc_page = this->m_docPages->GetAt(m_currpage);
-	double new_zoom = scrollviewer->ZoomFactor;
+	double new_scroll_zoom = scrollviewer->ZoomFactor;
 
-	if (new_zoom == 1.0)
+	/* Check if we are already at this resolution with this page */
+	if (new_scroll_zoom == doc_page->PageZoom)
 		return;
 
 	if (!e->IsIntermediate)
 	{
 		int page = m_currpage;
-		m_doczoom = new_zoom * m_doczoom;
-		new_zoom = m_doczoom;
 
-		/* Render at new resolution */
-		spatial_info_t spatial_info = InitSpatial(new_zoom);
+		m_doczoom = new_scroll_zoom;
+		if (m_doczoom > ZOOM_MAX)
+		{
+			m_doczoom = ZOOM_MAX;
+		}
+		if (m_doczoom < ZOOM_MIN)
+		{
+			m_doczoom = ZOOM_MIN;
+		}
+		/* Render at new resolution. */
+		spatial_info_t spatial_info = InitSpatial(m_doczoom);
 		Point ras_size = ComputePageSize(spatial_info, page);
+		doc_page->PageZoom = m_doczoom;
 
-		/* Go ahead and create display list if we dont have one for this page */
 		auto render_task =
 			create_task(mu_doc->RenderPageAsync(page, ras_size.X, ras_size.Y, true));
-		render_task.then([this, page, ras_size, new_zoom, scrollviewer] (InMemoryRandomAccessStream^ ras)
-		{
-			scrollviewer->ZoomToFactor(1.0);
-			ReplaceImage(page, ras, ras_size, new_zoom);
+		render_task.then([this, page, ras_size, scrollviewer](InMemoryRandomAccessStream^ ras)
+		{ 
+			ReplaceImage(page, ras, ras_size, m_doczoom);
 		}, task_continuation_context::use_current());
-		UpdateZoom(m_currpage, false);
+		UpDateThumbSizes();
 	}
 }
 
@@ -1469,8 +1519,27 @@ void MainPage::ZoomOutPress(Platform::Object^ sender, Windows::UI::Xaml::RoutedE
 
 void MainPage::NonTouchZoom(int zoom)
 {
-	double curr_zoom = m_doczoom;
-	int page = m_currpage;
+	auto doc_page = this->m_docPages->GetAt(m_currpage);
+	double curr_zoom = doc_page->PageZoom;
+
+	ScrollViewer^ scrollviewer;
+	FlipViewItem^ item = safe_cast<FlipViewItem^>
+		(m_curr_flipView->ItemContainerGenerator->ContainerFromIndex(m_currpage));
+	auto item2 = m_curr_flipView->ItemContainerGenerator->ContainerFromIndex(m_currpage);
+
+	/* We don't know which one so check for both */
+	ScrollViewer^ t1 =
+		safe_cast<ScrollViewer^> (FindVisualChildByName(item2, "xaml_ScrollView_v"));
+	ScrollViewer^ t2 =
+		safe_cast<ScrollViewer^> (FindVisualChildByName(item2, "xaml_ScrollView_h"));
+
+	if (t1 != nullptr)
+		scrollviewer = t1;
+	else
+		scrollviewer = t2;
+
+	if (scrollviewer == nullptr)
+		return;
 
 	if (zoom == ZOOM_IN)
 	{
@@ -1484,39 +1553,42 @@ void MainPage::NonTouchZoom(int zoom)
 	} else
 		return;
 
-	auto doc_page = this->m_docPages->GetAt(page);
+	/* It all needs to be driven by the scroll viewer otherwise we
+	   end up out of sync */
+	Platform::Object^ obj_zoom = (float)curr_zoom;
+	Platform::IBox<float>^ box_zoom;
+	box_zoom = safe_cast<Platform::IBox<float>^>(obj_zoom);
 
-	/* Render at new resolution */
-	spatial_info_t spatial_info = InitSpatial(curr_zoom);
-	Point ras_size = ComputePageSize(spatial_info, page);
-
-	/* Render and replace */
-	auto render_task =
-		create_task(mu_doc->RenderPageAsync(page, ras_size.X, ras_size.Y, true));
-	render_task.then([this, page, ras_size, curr_zoom] (InMemoryRandomAccessStream^ ras)
-	{
-		ReplaceImage(page, ras, ras_size, curr_zoom);
-	}, task_continuation_context::use_current());
-	m_doczoom = curr_zoom;
-	UpdateZoom(page, false);
+	scrollviewer->ChangeView(nullptr, nullptr, box_zoom, false);
 }
 
-/* Get adjacent pages properly scaled when zoom changed */
-void MainPage::UpdateZoom(int page_num, bool ignore_curr)
+/* Adjust the page scrollviewer to the current zoom level */
+void MainPage::UpdateZoom()
 {
-	for (int k = page_num - LOOK_AHEAD_SCALE; k <= page_num + LOOK_AHEAD_SCALE; k++)
-	{
-		bool skip = !(k == page_num && ignore_curr);
-		if (k >= 0 && k < m_num_pages)
-		{
-			auto page = this->m_docPages->GetAt(k);
-			if (page->Zoom != m_doczoom && skip) 
-			{
-				page->Height = (int) ((double) page->NativeHeight * m_doczoom);
-				page->Width = (int) ((double) page->NativeWidth * m_doczoom);
-			}
-		}
-	}
+	ScrollViewer^ scrollviewer;
+	FlipViewItem^ item = safe_cast<FlipViewItem^>
+		(m_curr_flipView->ItemContainerGenerator->ContainerFromIndex(m_currpage));
+	auto item2 = m_curr_flipView->ItemContainerGenerator->ContainerFromIndex(m_currpage);
+
+	/* We don't know which one so check for both */
+	ScrollViewer^ t1 =
+		safe_cast<ScrollViewer^> (FindVisualChildByName(item2, "xaml_ScrollView_v"));
+	ScrollViewer^ t2 =
+		safe_cast<ScrollViewer^> (FindVisualChildByName(item2, "xaml_ScrollView_h"));
+
+	if (t1 != nullptr)
+		scrollviewer = t1;
+	else
+		scrollviewer = t2;
+
+	if (scrollviewer == nullptr)
+		return;
+
+	float curr_zoom = scrollviewer->ZoomFactor;
+	Platform::Object^ obj_zoom = (float)m_doczoom;
+	Platform::IBox<float>^ box_zoom;
+	box_zoom = safe_cast<Platform::IBox<float>^>(obj_zoom);
+	scrollviewer->ChangeView(nullptr, nullptr, box_zoom, false);
 }
 
 /* Zoom in and out for keyboard only case. */
@@ -1556,95 +1628,79 @@ bool MainPage::IsNotStandardView()
 			xaml_WebView->Visibility == Windows::UI::Xaml::Visibility::Visible);
 }
 
-/* The following code is for print support.  This is just a simple demonstration of
-   printing with MuPDF in the Windows 8 environment */
+/* The following code is for print support. */
 void MainPage::RegisterForPrinting()
 {
-	m_printdoc = ref new PrintDocument();
-	m_printdoc_source = m_printdoc->DocumentSource;
-	m_printdoc->Paginate += 
-		ref new Windows::UI::Xaml::Printing::PaginateEventHandler(this, &MainPage::CreatePrintPreviewPages);
-	m_printdoc->GetPreviewPage += 
-		ref new Windows::UI::Xaml::Printing::GetPreviewPageEventHandler(this, &MainPage::GetPrintPreviewPages);
-	m_printdoc->AddPages += 
-		ref new Windows::UI::Xaml::Printing::AddPagesEventHandler(this, &MainPage::AddPrintPages);
-
-	PrintManager^ printMan = PrintManager::GetForCurrentView();
-	m_printTaskRequestedEventToken = 
-		printMan->PrintTaskRequested += 
-		ref new TypedEventHandler<PrintManager^, PrintTaskRequestedEventArgs^>(this, &MainPage::PrintTaskRequested);        
+	m_print_manager = Windows::Graphics::Printing::PrintManager::GetForCurrentView();
+	m_print_manager->PrintTaskRequested +=
+		ref new TypedEventHandler<PrintManager^, PrintTaskRequestedEventArgs^>(this, &MainPage::SetPrintTask);
 }
 
-void MainPage::UnregisterForPrinting()
+void MainPage::SetPrintTask(PrintManager^ sender, PrintTaskRequestedEventArgs^ args)
 {
-	// Remove the handler for printing initialization.
-	PrintManager^ printMan = PrintManager::GetForCurrentView();
-	printMan->PrintTaskRequested -= m_printTaskRequestedEventToken;
+	PrintTaskSourceRequestedHandler^ source_handler =
+		ref new PrintTaskSourceRequestedHandler([this](PrintTaskSourceRequestedArgs^ args)-> void{
+		Microsoft::WRL::ComPtr<PrintPages> document_source;
+		ThrowIfFailed(Microsoft::WRL::MakeAndInitialize<PrintPages>(&document_source, reinterpret_cast<IUnknown*>(this)));
+		IPrintDocumentSource^ objSource(reinterpret_cast<IPrintDocumentSource^>(document_source.Get()));
+		args->SetSource(objSource);
+	});
+
+	PrintTask^ print_task = 
+		args->Request->CreatePrintTask(L"MuPDF WinRT Print", source_handler);
+	
+	/* Call backs so that we know when we are all done with the printing */
+	print_task->Progressing += 
+		ref new TypedEventHandler<PrintTask^, PrintTaskProgressingEventArgs^>(this, &MainPage::PrintProgress);
+	print_task->Completed +=
+		ref new TypedEventHandler<PrintTask^, PrintTaskCompletedEventArgs^>(this, &MainPage::PrintCompleted);
+	m_print_active = true;
+	m_curr_print_count = 0;
+
+	PrintTaskOptionDetails^ printDetailedOptions = 
+		PrintTaskOptionDetails::GetFromPrintTaskOptions(print_task->Options);
+
+	// Some standard printer options
+	printDetailedOptions->DisplayedOptions->Clear();
+	printDetailedOptions->DisplayedOptions->Append(Windows::Graphics::Printing::StandardPrintTaskOptions::MediaSize);
+	printDetailedOptions->DisplayedOptions->Append(Windows::Graphics::Printing::StandardPrintTaskOptions::Copies);
+
+	// Our custom options
+	PrintCustomItemListOptionDetails^ resolution = 
+	printDetailedOptions->CreateItemListOption("resolution", "Render Resolution");
+	resolution->AddItem("sres96", "96dpi");
+	resolution->AddItem("sres150", "150 dpi");
+	resolution->AddItem("sres300", "300 dpi");
+	resolution->AddItem("sres600", "600 dpi");
+	resolution->TrySetValue("sres600");
+	m_printresolution = 600;
+	printDetailedOptions->DisplayedOptions->Append("resolution");
+
+	PrintCustomItemListOptionDetails^ location = printDetailedOptions->CreateItemListOption("location", "Location");
+	location->AddItem("sCenter", "Center");
+	location->AddItem("sTopleft", "Top Left");
+	// Add the custom option to the option list.
+	printDetailedOptions->DisplayedOptions->Append("location");
+	location->TrySetValue("sCenter");
+	m_centerprint = true;
+	print_task->Options->MediaSize = PrintMediaSize::NorthAmericaLetter;
+
+	PrintCustomItemListOptionDetails^ pageFormat = printDetailedOptions->CreateItemListOption(L"PageRange", L"Page Range");
+	pageFormat->AddItem(L"PrintAll", L"Print all");
+	pageFormat->AddItem(L"PrintRange", L"Print Range");
+	printDetailedOptions->DisplayedOptions->Append(L"PageRange");
+	PrintCustomTextOptionDetails^ pageRangeEdit = printDetailedOptions->CreateTextOption(L"PageRangeEdit", L"Range");
+
+	printDetailedOptions->OptionChanged += 
+		ref new TypedEventHandler<PrintTaskOptionDetails^, PrintTaskOptionChangedEventArgs^>(this, &MainPage::PrintOptionsChanged);
 }
 
-void MainPage::PrintTaskRequested(PrintManager^ sender, PrintTaskRequestedEventArgs^ e)
+int MainPage::GetPrintPageCount()
 {
-	auto printTaskRef = std::make_shared<PrintTask^>(nullptr);
-	*printTaskRef = e->Request->CreatePrintTask("MuPDF Printing",  
-		ref new PrintTaskSourceRequestedHandler([this, printTaskRef](PrintTaskSourceRequestedArgs^ args)
-	{
-		PrintTask^ printTask = *printTaskRef;
-		PrintTaskOptionDetails^ printDetailedOptions = 
-			PrintTaskOptionDetails::GetFromPrintTaskOptions(printTask->Options);
-
-		// Some standard printer options
-		printDetailedOptions->DisplayedOptions->Clear();
-		printDetailedOptions->DisplayedOptions->Append(Windows::Graphics::Printing::StandardPrintTaskOptions::MediaSize);
-		printDetailedOptions->DisplayedOptions->Append(Windows::Graphics::Printing::StandardPrintTaskOptions::Copies);
-
-		// Our custom options
-		PrintCustomItemListOptionDetails^ resolution = 
-		printDetailedOptions->CreateItemListOption("resolution", "Render Resolution");
-		resolution->AddItem("sres72", "72 dpi");
-		resolution->AddItem("sres150", "150 dpi");
-		resolution->AddItem("sres300", "300 dpi");
-		resolution->AddItem("sres600", "600 dpi");
-		resolution->TrySetValue("sres600");
-		m_printresolution = 600;
-		printDetailedOptions->DisplayedOptions->Append("resolution");
-
-		PrintCustomItemListOptionDetails^ scaling = printDetailedOptions->CreateItemListOption("scaling", "Scaling");
-		scaling->AddItem("sScaleToFit", "Scale To Fit");
-		scaling->AddItem("sCrop", "Crop");
-		// Add the custom option to the option list.
-		printDetailedOptions->DisplayedOptions->Append("scaling");
-		scaling->TrySetValue("sScaleToFit");
-		m_printcrop = false;
-		printTask->Options->MediaSize = PrintMediaSize::NorthAmericaLetter;
-
-		PrintCustomItemListOptionDetails^ pageFormat = printDetailedOptions->CreateItemListOption(L"PageRange", L"Page Range");
-		pageFormat->AddItem(L"PrintAll", L"Print all");
-		pageFormat->AddItem(L"PrintRange", L"Print Range");
-		printDetailedOptions->DisplayedOptions->Append(L"PageRange");
-		PrintCustomTextOptionDetails^ pageRangeEdit = printDetailedOptions->CreateTextOption(L"PageRangeEdit", L"Range");
-
-		printDetailedOptions->OptionChanged += 
-			ref new TypedEventHandler<PrintTaskOptionDetails^, PrintTaskOptionChangedEventArgs^>(this, &MainPage::PrintOptionsChanged);
-
-		// Invoked when the print job is completed.
-		printTask->Completed += ref new TypedEventHandler<PrintTask^, PrintTaskCompletedEventArgs^>(
-		[=](PrintTask^ sender, PrintTaskCompletedEventArgs^ e)
-		{
-			auto callback = ref new Windows::UI::Core::DispatchedHandler(
-			[=]()
-			{
-				ClearPrintCollection();
-				m_printpagedesc = PrintPageDesc();
-				if (e->Completion == Windows::Graphics::Printing::PrintTaskCompletion::Failed)
-				{
-					NotifyUser("Sorry, printing failed", StatusMessage);
-				}
-			});
-			Dispatcher->RunAsync(Windows::UI::Core::CoreDispatcherPriority::Normal, callback);
-		});
-		// Set the document source.
-		args->SetSource(PrintDocumentSource);
-		}));
+	if (m_ppage_num_list.size() > 0)
+		return m_ppage_num_list.size();
+	else
+		return m_num_pages;
 }
 
 void MainPage::PrintOptionsChanged(PrintTaskOptionDetails^ sender, PrintTaskOptionChangedEventArgs^ args)
@@ -1661,9 +1717,9 @@ void MainPage::PrintOptionsChanged(PrintTaskOptionDetails^ sender, PrintTaskOpti
 		IPrintOptionDetails^ resolution = sender->Options->Lookup(optionId);
 		String^ resolutionValue = safe_cast<String^>(resolution->Value);
 
-		if (resolutionValue == "sres72")
+		if (resolutionValue == "sres96")
 		{
-			m_printresolution = 72;
+			m_printresolution = 96;
 		}
 		else if (resolutionValue == "sres150")
 		{
@@ -1680,18 +1736,18 @@ void MainPage::PrintOptionsChanged(PrintTaskOptionDetails^ sender, PrintTaskOpti
 	}
 
 	/* Need to update preview with a change of this one */
-	if (optionId == "scaling")
+	if (optionId == "location")
 	{
 		IPrintOptionDetails^ scaling = sender->Options->Lookup(optionId);
 		String^ scaleValue = safe_cast<String^>(scaling->Value);
 
-		if (scaleValue == "sScaleToFit")
+		if (scaleValue == "sCenter")
 		{
-			m_printcrop = false;
+			m_centerprint = true;
 		}
-		if (scaleValue == "sCrop")
+		if (scaleValue == "sTopleft")
 		{
-			m_printcrop = true;
+			m_centerprint = false;
 		}
 		force_reset = true;
 	}
@@ -1821,241 +1877,204 @@ void MainPage::RemovePageRangeEdit(PrintTaskOptionDetails^ printTaskOptionDetail
 	}
 }
 
-void MainPage::ClearPrintCollection()
+void MainPage::CreatePrintControl(_In_  IPrintDocumentPackageTarget* docPackageTarget,
+									_In_  D2D1_PRINT_CONTROL_PROPERTIES* printControlProperties)
 {
-	m_printlock.lock();
-	for (int k = 0; k < m_num_pages; k++)
-	{
-		auto thumb_page = this->m_thumbnails->GetAt(k);
-		this->m_printpages->SetAt(k, thumb_page);
-	}
-	m_printlock.unlock();
+	m_d2d_printcontrol = nullptr;
+	ThrowIfFailed(m_d2d_device->CreatePrintControl(m_wic_factory.Get(), docPackageTarget,
+					printControlProperties, &m_d2d_printcontrol));
 }
 
-/* Just use the thumbnail images for now */
-void MainPage::CreatePrintPreviewPages(Object^ sender, PaginateEventArgs^ e)
+void MainPage::DrawPreviewSurface(float width, float height, float scale_in, 
+								  D2D1_RECT_F contentBox, uint32 page_num, 
+								  IPrintPreviewDxgiPackageTarget* previewTarget)
 {
-	InterlockedIncrement64(&m_requestCount);
-	PrintPageDesc ppageDescription;
-	PrintTaskOptionDetails^ printDetailedOptions = 
-		PrintTaskOptionDetails::GetFromPrintTaskOptions(e->PrintTaskOptions);
-	PrintPageDescription DeviceDescription = 
-		e->PrintTaskOptions->GetPageDescription(0);
-
-	/* This has the media dimension */
-	ppageDescription.pagesize = DeviceDescription.PageSize;
-
-	ppageDescription.resolution.Width = DeviceDescription.DpiX;
-	ppageDescription.resolution.Height = DeviceDescription.DpiY;
-
-	ppageDescription.margin.Width = (std::max)(DeviceDescription.ImageableRect.Left, 
-												DeviceDescription.ImageableRect.Right - 
-												DeviceDescription.PageSize.Width);
-
-	ppageDescription.margin.Height = (std::max)(DeviceDescription.ImageableRect.Top, 
-												DeviceDescription.ImageableRect.Bottom - 
-												DeviceDescription.PageSize.Height);
-
-	ppageDescription.printpagesize.Width = DeviceDescription.PageSize.Width - 
-											ppageDescription.margin.Width * 2;
-	ppageDescription.printpagesize.Height = DeviceDescription.PageSize.Height - 
-											ppageDescription.margin.Height * 2;
-
-	ClearPrintCollection();
-	PrintDocument^ printDocument = safe_cast<PrintDocument^>(sender);
-	m_printpagedesc = ppageDescription;
+	int dpi = 96;
+	int index_page_num = page_num - 1;
+	int ren_page_num = index_page_num;
 
 	if (m_ppage_num_list.size() > 0)
+		ren_page_num = m_ppage_num_list[page_num - 1] - 1;
+
+	/* This goes on in a background thread.  Hence is non-blocking for UI */
+	assert(IsBackgroundThread());
+
+	/* Set up all the DirectX stuff */
+	CD3D11_TEXTURE2D_DESC textureDesc(DXGI_FORMAT_B8G8R8A8_UNORM, 
+									static_cast<uint32>(ceil(width  * dpi / 96)),
+									static_cast<uint32>(ceil(height * dpi / 96)),
+									1, 1, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+	ComPtr<ID3D11Texture2D> texture;
+	ThrowIfFailed(m_d3d_device->CreateTexture2D(&textureDesc, nullptr, &texture));
+	ComPtr<IDXGISurface> dxgi_surface;
+	ThrowIfFailed(texture.As<IDXGISurface>(&dxgi_surface));
+
+	// Create a new D2D device context for rendering the preview surface. D2D
+	// device contexts are stateful, and hence a unique device context must be
+	// used on each thread.
+	ComPtr<ID2D1DeviceContext> d2d_context;
+	ThrowIfFailed(m_d2d_device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+													&d2d_context));
+	// Update DPI for preview surface as well.
+	d2d_context->SetDpi(96, 96);
+
+	D2D1_BITMAP_PROPERTIES1 bitmap_properties =
+		D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+				D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+
+	// Create surface bitmap on which page content is drawn.
+	ComPtr<ID2D1Bitmap1> d2d_surfacebitmap;
+	ThrowIfFailed(d2d_context->CreateBitmapFromDxgiSurface(dxgi_surface.Get(),
+									&bitmap_properties, &d2d_surfacebitmap));
+	d2d_context->SetTarget(d2d_surfacebitmap.Get());
+
+	/* Figure out all the sizing */
+	spatial_info_t spatial_info;
+	spatial_info.scale_factor = 1.0;
+	spatial_info.size.X = width;
+	spatial_info.size.Y = height;
+	Point ras_size = ComputePageSize(spatial_info, ren_page_num);
+	ras_size.X = ceil(ras_size.X);
+	ras_size.Y = ceil(ras_size.Y);
+
+	Array<unsigned char>^ bmp_data;
+	int code = mu_doc->RenderPageBitmapSync(ren_page_num, ras_size.X, ras_size.Y, 
+											true, &bmp_data);
+	D2D1_SIZE_U bit_map_rect;
+	bit_map_rect.width = ras_size.X;
+	bit_map_rect.height = ras_size.Y;
+
+	D2D1_BITMAP_PROPERTIES1 bitmap_properties2 =
+		D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+		D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+
+	ID2D1Bitmap1 *bit_map;
+	ThrowIfFailed(d2d_context->CreateBitmap(bit_map_rect,  &(bmp_data[0]), 
+											ras_size.X * 4, &bitmap_properties2, 
+											&bit_map));
+	D2D1_SIZE_F size = bit_map->GetSize();
+
+	/* Handle centering */
+	float y_offset = 0;
+	float x_offset = 0;
+	if (m_centerprint) 
 	{
-		printDocument->SetPreviewPageCount(m_ppage_num_list.size(), 
-											PreviewPageCountType::Intermediate);
+		y_offset = (height - size.height) / 2.0;
+		x_offset = (width - size.width) / 2.0;
 	}
-	else
-	{
-		printDocument->SetPreviewPageCount(m_num_pages, 
-											PreviewPageCountType::Intermediate);
-	}
+
+	d2d_context->BeginDraw();
+	d2d_context->DrawBitmap(bit_map, D2D1::RectF(x_offset, y_offset, 
+							size.width + x_offset, size.height + y_offset));
+	ThrowIfFailed(d2d_context->EndDraw());
+	ThrowIfFailed(previewTarget->DrawPage(page_num, dxgi_surface.Get(), dpi, dpi));
 }
 
-/* Set the page with the new raster information */
-void MainPage::UpdatePreview(int page_num, InMemoryRandomAccessStream^ ras,
-			  Point ras_size, Page_Content_t content_type, double zoom_in)
+HRESULT MainPage::ClosePrintControl()
 {
-	assert(IsMainThread());
-
-	WriteableBitmap ^bmp = ref new WriteableBitmap(ras_size.X, ras_size.Y);
-	bmp->SetSource(ras);
-
-	DocumentPage^ doc_page = ref new DocumentPage();
-	doc_page->Image = bmp;
-
-	doc_page->Height = ras_size.Y;
-	doc_page->Width = ras_size.X;
-	doc_page->Content = content_type;
-	doc_page->Zoom = zoom_in;
-	this->m_printpages->SetAt(page_num, doc_page);
+	return (m_d2d_printcontrol == nullptr) ? S_OK : m_d2d_printcontrol->Close();
 }
 
-void MainPage::CleanUpPreview(int page_num)
+void MainPage::PrintPage(uint32 page_num, D2D1_RECT_F image_area, D2D1_SIZE_F page_area, 
+						 float device_dpi, IStream* print_ticket) 
 {
-	for (int k = page_num - 1; k <= page_num + 1; k++)
-	{
-		if (k >= 0 && k < this->m_num_pages && k != page_num)
-		{
-			auto doc = this->m_printpages->GetAt(k);
-			if (doc->Content == THUMBNAIL) return;
+	int dpi = m_printresolution;
+	int index_page_num = page_num - 1;
+	int ren_page_num = index_page_num;
 
-			if (this->m_thumbnails->Size > k)
-			{
-				auto thumb_page = this->m_thumbnails->GetAt(k);
-				this->m_printpages->SetAt(k, thumb_page);
-			}
-		}
+	/* Windoze seems to hand me a bogus dpi */
+	device_dpi = 96;
+
+	if (m_ppage_num_list.size() > 0)
+		ren_page_num = m_ppage_num_list[page_num - 1] - 1;
+
+	/* This goes on in a background thread.  Hence is non-blocking for UI */
+	assert(IsBackgroundThread());
+
+	/* Print command list set up */
+	ComPtr<ID2D1DeviceContext> d2d_context;
+	ThrowIfFailed(m_d2d_device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
+													&d2d_context));
+	ComPtr<ID2D1CommandList> clist;
+	ThrowIfFailed(d2d_context->CreateCommandList(&clist));
+	d2d_context->SetTarget(clist.Get());
+
+	/* Figure out all the sizing.  Width and height here are for device_dpi */
+	float width = image_area.right - image_area.left;
+	float height  = image_area.bottom - image_area.top;
+
+	spatial_info_t spatial_info;
+	spatial_info.scale_factor = 1.0;
+	/* width and height are based upon device dpi (96) and MuPDF native 
+	   resolution is 72dpi */
+	spatial_info.size.X = (width /device_dpi) * (m_printresolution);
+	spatial_info.size.Y = (height /device_dpi) * (m_printresolution);
+	Point ras_size = ComputePageSize(spatial_info, ren_page_num);
+	ras_size.X = ceil(ras_size.X);
+	ras_size.Y = ceil(ras_size.Y);
+
+	Array<unsigned char>^ bmp_data;
+	int code = mu_doc->RenderPageBitmapSync(ren_page_num, ras_size.X, ras_size.Y, 
+											true, &bmp_data);
+	D2D1_SIZE_U bit_map_rect;
+	bit_map_rect.width = ras_size.X;
+	bit_map_rect.height = ras_size.Y;
+
+	D2D1_BITMAP_PROPERTIES1 bitmap_properties2 =
+		D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+		D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+
+	ID2D1Bitmap1 *bit_map;
+	ThrowIfFailed(d2d_context->CreateBitmap(bit_map_rect,  &(bmp_data[0]), 
+											ras_size.X * 4, &bitmap_properties2, 
+											&bit_map));
+	D2D1_SIZE_F size = bit_map->GetSize();
+
+	/* Handle centering */
+	float y_offset = 0;
+	float x_offset = 0;
+	if (m_centerprint) 
+	{
+		/* Offsets need to be provided in the device dpi */
+		y_offset = (page_area.height - (size.height * device_dpi / m_printresolution)) / 2.0;
+		x_offset = (page_area.width - (size.width * device_dpi / m_printresolution)) / 2.0;
 	}
+
+	float image_height = (bit_map_rect.height / m_printresolution) * device_dpi;
+	float image_width = (bit_map_rect.width / m_printresolution) * device_dpi;
+
+	d2d_context->BeginDraw();
+	d2d_context->DrawBitmap(bit_map, D2D1::RectF(x_offset, y_offset, 
+							image_width + x_offset, image_height + y_offset));
+	ThrowIfFailed(d2d_context->EndDraw());
+	ThrowIfFailed(clist->Close());
+	ThrowIfFailed(m_d2d_printcontrol->AddPage(clist.Get(), page_area, print_ticket));
 }
 
 void MainPage::RefreshPreview()
 {
-	auto callback = 
-		ref new Windows::UI::Core::DispatchedHandler([this]()
-	{
-		m_printdoc->InvalidatePreview();
-	});
-	Dispatcher->RunAsync(Windows::UI::Core::CoreDispatcherPriority::Normal, callback);
+	PrintPages *p_struct = (PrintPages*) m_print_struct;
+	p_struct->ResetPreview();
 }
 
-void MainPage::GetPrintPreviewPages(Object^ sender, GetPreviewPageEventArgs^ e)
+/* This reference is needed so that we can reset preview when changes occur on options */
+void MainPage::SetPrintTarget(void *print_struct)
 {
-	PrintDocument^ printDocument = safe_cast<PrintDocument^>(sender);
-
-	LONGLONG requestNumber = 0;
-	InterlockedExchange64(&requestNumber, m_requestCount);
-	int index_page_num = e->PageNumber;
-	int ren_page_num = index_page_num;
-
-	if (m_ppage_num_list.size() > 0)
-	{
-		ren_page_num = m_ppage_num_list[index_page_num - 1];
-	}
-	auto doc_curr = this->m_printpages->GetAt(ren_page_num - 1);
-	if (doc_curr->Content == PRINT_PREVIEW) 
-	{
-		auto bitmap = doc_curr->Image;
-		Image^ image = ref new Image();
-		image->Source = bitmap;
-		image->HorizontalAlignment = Windows::UI::Xaml::HorizontalAlignment::Center;
-		image->VerticalAlignment = Windows::UI::Xaml::VerticalAlignment::Center;
-		image->Stretch = Stretch::UniformToFill;
-		image->Width = bitmap->PixelWidth;
-		image->Height = bitmap->PixelHeight;
-		printDocument->SetPreviewPage(index_page_num, image);
-	}
-	else 
-	{
-		/* Determine the scale to fit case or crop */
-		spatial_info_t spatial_info = InitSpatial(1.0);
-		int pagNum = ren_page_num - 1;
-		Point ras_size = ComputePageSize(spatial_info, pagNum);
-		float scale = 1.0;
-
-		if (!(this->m_printcrop))
-		{
-			float scaleY = m_printpagedesc.printpagesize.Height / ras_size.Y;
-			float scaleX = m_printpagedesc.printpagesize.Width / ras_size.X;
-			scale = (std::min)(scaleY, scaleX);
-		}
-		auto render_task =
-				create_task(mu_doc->RenderPageAsync(pagNum, ras_size.X, ras_size.Y, true));
-			render_task.then([=] (InMemoryRandomAccessStream^ ras)
-			{
-				UpdatePreview(pagNum, ras, ras_size, PRINT_PREVIEW, scale);
-				auto doc_curr = this->m_printpages->GetAt(pagNum);
-				auto bitmap = doc_curr->Image;
-				Image^ image = ref new Image();
-				image->Source = bitmap;
-				image->HorizontalAlignment = Windows::UI::Xaml::HorizontalAlignment::Center;
-				image->VerticalAlignment = Windows::UI::Xaml::VerticalAlignment::Center;
-				image->Stretch = Stretch::UniformToFill;
-				image->Width = bitmap->PixelWidth * scale;
-				image->Height = bitmap->PixelHeight * scale;
-				printDocument->SetPreviewPage(index_page_num, image);
-			}, task_continuation_context::use_current());
-	}
-	this->CleanUpPreview(ren_page_num - 1);
+	m_print_struct = print_struct;
 }
 
-void MainPage::AddPrintPages(Object^ sender, AddPagesEventArgs^ e)
+/* These are called by the print thread and as such we cannot do UI updates 
+   directly.   However we can keep a monitor of what is going on so that if
+   someone tries to open a new document while we are printing some monster doc,
+   we can let them know that they need to wait.  */
+void MainPage::PrintProgress(PrintTask^ sender, PrintTaskProgressingEventArgs^ args)
 {
-	PrintDocument^ printDocument = safe_cast<PrintDocument^>(sender);
+	assert(IsBackgroundThread());
+	this->m_curr_print_count = args->DocumentPageCount;
+}
 
-	/* We create a list of tasks to create the pages for printing.  Once all the 
-		pages are created then we can go ahead and start adding them for printing */
-	std::vector<concurrency::task<void>> createPageTasks;
-	double res_scale = ((double) m_printresolution / 72.0);
-	int page_count = m_num_pages;
-
-	if (m_ppage_num_list.size() > 0)
-		page_count = m_ppage_num_list.size();
-
-	for(int i = 0; i < page_count; ++i)
-	{
-		m_printlock.lock();
-
-		int page_num = i;
-		if (m_ppage_num_list.size() > 0)
-			page_num = m_ppage_num_list[i] - 1;
-
-		auto doc_curr = this->m_printpages->GetAt(page_num);
-		if (doc_curr->Content != FULL_RESOLUTION) 
-		{
-			spatial_info_t spatial_info = InitSpatial(res_scale);
-			Point ras_size = ComputePageSize(spatial_info, page_num);
-			float scale = 1.0;
-
-			if (!(this->m_printcrop))
-			{
-				spatial_info = InitSpatial(1.0);
-				ras_size = ComputePageSize(spatial_info, page_num);
-				float scaleY = m_printpagedesc.printpagesize.Height / ras_size.Y;
-				float scaleX = m_printpagedesc.printpagesize.Width / ras_size.X;
-				scale = (std::min)(scaleY, scaleX);
-				spatial_info = InitSpatial(res_scale * scale);
-				ras_size = ComputePageSize(spatial_info, page_num);
-			}
-			auto render_task =
-				create_task(mu_doc->RenderPageAsync(page_num, ras_size.X, ras_size.Y, true));
-			createPageTasks.push_back(render_task.then([=] (InMemoryRandomAccessStream^ ras)
-			{
-				UpdatePreview(page_num, ras, ras_size, FULL_RESOLUTION, 1.0);
-			}, task_continuation_context::use_current()));
-		}
-		m_printlock.unlock();
-	}
-
-	/* When all the tasks have finished then go ahead and add them to the print 
-		document */
-	concurrency::when_all(createPageTasks.begin(), createPageTasks.end()). then([=]
-	{
-		for (int i = 0; i < page_count; i++) 
-		{
-			int page_num = i;
-			if (m_ppage_num_list.size() > 0)
-				page_num = m_ppage_num_list[i] - 1;
-			auto doc_curr = this->m_printpages->GetAt(page_num);
-			auto bitmap = doc_curr->Image;
-			Image^ image = ref new Image();
-			image->Source = bitmap;
-			image->HorizontalAlignment = Windows::UI::Xaml::HorizontalAlignment::Center;
-			image->VerticalAlignment = Windows::UI::Xaml::VerticalAlignment::Center;
-			image->Stretch = Stretch::UniformToFill;
-			image->Width = bitmap->PixelWidth / res_scale;
-			image->Height = bitmap->PixelHeight / res_scale;
-			printDocument->AddPage(image);  
-		}
-		/* All pages provided. */
-		printDocument->AddPagesComplete();
-		/* Reset the current page description as soon as possible since the 
-			PrintTask.Completed event might fire later */
-		m_printpagedesc = PrintPageDesc();
-	});
+void MainPage::PrintCompleted(PrintTask^ sender, PrintTaskCompletedEventArgs^ args)
+{
+	assert(IsBackgroundThread());
+	m_print_active = false;
 }
