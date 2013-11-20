@@ -1311,7 +1311,7 @@ void pdf_update_text_markup_appearance(pdf_document *doc, pdf_annot *annot, fz_a
 			color[0] = 1.0;
 			color[1] = 1.0;
 			color[2] = 0.0;
-			alpha = 0.5;
+			alpha = 1.0;
 			line_thickness = 1.0;
 			line_height = 0.5;
 			break;
@@ -1335,7 +1335,8 @@ void pdf_update_text_markup_appearance(pdf_document *doc, pdf_annot *annot, fz_a
 			return;
 	}
 
-	pdf_set_markup_appearance(doc, annot, color, alpha, line_thickness, line_height);
+	pdf_set_markup_appearance(doc, annot, color, alpha, line_thickness, line_height,
+														FZ_BLEND_MULTIPLY);
 }
 
 static void update_rect(fz_context *ctx, pdf_annot *annot)
@@ -1449,7 +1450,7 @@ quadpoints(pdf_document *doc, pdf_obj *annot, int *nout)
 	return qp;
 }
 
-void pdf_set_markup_appearance(pdf_document *doc, pdf_annot *annot, float color[3], float alpha, float line_thickness, float line_height)
+void pdf_set_markup_appearance(pdf_document *doc, pdf_annot *annot, float color[3], float alpha, float line_thickness, float line_height, int blendmode)
 {
 	fz_context *ctx = doc->ctx;
 	const fz_matrix *page_ctm = &annot->page->ctm;
@@ -1475,9 +1476,13 @@ void pdf_set_markup_appearance(pdf_document *doc, pdf_annot *annot, float color[
 		rect.y0 = rect.y1 = qp[0].y;
 		for (i = 0; i < n; i++)
 			fz_include_point_in_rect(&rect, &qp[i]);
+		fz_transform_rect(&rect, page_ctm);
 
 		strike_list = fz_new_display_list(ctx);
 		dev = fz_new_list_device(ctx, strike_list);
+
+		if (blendmode)
+			fz_begin_group (dev, &rect, 0, 0, blendmode, 1.0f);
 
 		for (i = 0; i < n; i += 4)
 		{
@@ -1522,7 +1527,9 @@ void pdf_set_markup_appearance(pdf_document *doc, pdf_annot *annot, float color[
 			fz_stroke_path(dev, path, stroke, page_ctm, fz_device_rgb(ctx), color, alpha);
 		}
 
-		fz_transform_rect(&rect, page_ctm);
+		if (blendmode)
+			fz_end_group(dev);
+
 		pdf_set_annot_appearance(doc, annot, &rect, strike_list);
 	}
 	fz_always(ctx)
