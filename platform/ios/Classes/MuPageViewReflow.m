@@ -122,6 +122,13 @@ NSString *textAsHtml(fz_document *doc, int pageNum)
 -(void) hideLinks {}
 -(void) showSearchResults: (int)count {}
 -(void) clearSearchResults {}
+-(void) textSelectModeOn {}
+-(void) textSelectModeOff {}
+-(void) inkModeOn {}
+-(void) inkModeOff {}
+-(void) saveSelectionAsMarkup:(int)type {}
+-(void) saveInk {}
+
 -(void) resetZoomAnimated: (BOOL)animated
 {
 	[self.scrollView setContentOffset:CGPointZero animated:NO];
