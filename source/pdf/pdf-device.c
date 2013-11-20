@@ -63,7 +63,6 @@ typedef struct group_entry_s group_entry;
 
 struct group_entry_s
 {
-	int blendmode;
 	int alpha;
 	int isolated;
 	int knockout;
@@ -82,6 +81,10 @@ struct pdf_device_s
 
 	int num_forms;
 	int num_smasks;
+
+	int num_blendmodes;
+	int max_blendmodes;
+	int *blendmodes;
 
 	int num_gstates;
 	int max_gstates;
@@ -514,10 +517,11 @@ pdf_dev_alpha(pdf_device *pdev, float alpha, int stroke)
 		pdev->alphas[i].alpha = alpha;
 		pdev->alphas[i].stroke = stroke;
 
-		o = pdf_new_dict(doc, 1);
+		o = pdf_new_dict(doc, 2);
 		fz_try(ctx)
 		{
 			char text[32];
+			pdf_dict_puts_drop(o, "Type", pdf_new_name(doc, "ExtGState"));
 			pdf_dict_puts_drop(o, (stroke ? "CA" : "ca"), pdf_new_real(doc, alpha));
 			ref = pdf_new_ref(doc, o);
 			snprintf(text, sizeof(text), "ExtGState/Alp%d", i);
@@ -767,7 +771,7 @@ pdf_dev_end_text(pdf_device *pdev)
 }
 
 static int
-pdf_dev_new_form(pdf_obj **form_ref, pdf_device *pdev, const fz_rect *bbox, int isolated, int knockout, int blendmode, float alpha, fz_colorspace *colorspace)
+pdf_dev_new_form(pdf_obj **form_ref, pdf_device *pdev, const fz_rect *bbox, int isolated, int knockout, float alpha, fz_colorspace *colorspace)
 {
 	fz_context *ctx = pdev->ctx;
 	pdf_document *doc = pdev->doc;
@@ -782,7 +786,7 @@ pdf_dev_new_form(pdf_obj **form_ref, pdf_device *pdev, const fz_rect *bbox, int 
 	for(num = 0; num < pdev->num_groups; num++)
 	{
 		group_entry *g = &pdev->groups[num];
-		if (g->isolated == isolated && g->knockout == knockout && g->blendmode == blendmode && g->alpha == alpha && g->colorspace == colorspace)
+		if (g->isolated == isolated && g->knockout == knockout && g->alpha == alpha && g->colorspace == colorspace)
 		{
 			group_ref = pdev->groups[num].ref;
 			break;
@@ -803,7 +807,6 @@ pdf_dev_new_form(pdf_obj **form_ref, pdf_device *pdev, const fz_rect *bbox, int 
 		pdev->num_groups++;
 		pdev->groups[num].isolated = isolated;
 		pdev->groups[num].knockout = knockout;
-		pdev->groups[num].blendmode = blendmode;
 		pdev->groups[num].alpha = alpha;
 		pdev->groups[num].colorspace = fz_keep_colorspace(ctx, colorspace);
 		pdev->groups[num].ref = NULL;
@@ -814,7 +817,6 @@ pdf_dev_new_form(pdf_obj **form_ref, pdf_device *pdev, const fz_rect *bbox, int 
 			pdf_dict_puts_drop(group, "S", pdf_new_name(doc, "Transparency"));
 			pdf_dict_puts_drop(group, "K", pdf_new_bool(doc, knockout));
 			pdf_dict_puts_drop(group, "I", pdf_new_bool(doc, isolated));
-			pdf_dict_puts_drop(group, "BM", pdf_new_name(doc, fz_blendmode_name(blendmode)));
 			if (!colorspace)
 			{}
 			else if (colorspace->n == 1)
@@ -1098,7 +1100,7 @@ pdf_dev_begin_mask(fz_device *dev, const fz_rect *bbox, int luminosity, fz_color
 	pdf_dev_end_text(pdev);
 
 	/* Make a new form to contain the contents of the softmask */
-	pdf_dev_new_form(&form_ref, pdev, bbox, 0, 0, 0, 1, colorspace);
+	pdf_dev_new_form(&form_ref, pdev, bbox, 0, 0, 1, colorspace);
 
 	fz_try(ctx)
 	{
@@ -1168,6 +1170,7 @@ static void
 pdf_dev_begin_group(fz_device *dev, const fz_rect *bbox, int isolated, int knockout, int blendmode, float alpha)
 {
 	pdf_device *pdev = (pdf_device *)dev->user;
+	pdf_document *doc = (pdf_document *)pdev->doc;
 	fz_context *ctx = pdev->ctx;
 	int num;
 	pdf_obj *form_ref;
@@ -1175,7 +1178,7 @@ pdf_dev_begin_group(fz_device *dev, const fz_rect *bbox, int isolated, int knock
 
 	pdf_dev_end_text(pdev);
 
-	num = pdf_dev_new_form(&form_ref, pdev, bbox, isolated, knockout, blendmode, alpha, NULL);
+	num = pdf_dev_new_form(&form_ref, pdev, bbox, isolated, knockout, alpha, NULL);
 
 	/* Add the call to this group */
 	gs = CURRENT_GSTATE(pdev);
@@ -1184,6 +1187,45 @@ pdf_dev_begin_group(fz_device *dev, const fz_rect *bbox, int isolated, int knock
 	/* Now, everything we get until the end of group needs to go into a
 	 * new buffer, which will be the stream contents for the form. */
 	pdf_dev_push_new_buf(pdev, fz_new_buffer(ctx, 1024), NULL, form_ref);
+
+	/* The blendmode should be stored in an ExtGState and applied in the form's
+		 stream.  */
+	fz_try(ctx)
+	{
+		for (num = 0; num < pdev->num_blendmodes; ++num)
+			if (pdev->blendmodes[num] == blendmode)
+				break;
+		if (num == pdev->num_blendmodes)
+		{
+			pdf_obj *egs;
+			pdf_obj *egs_ref;
+			if (pdev->num_blendmodes == pdev->max_blendmodes)
+			{
+				int newmax = pdev->max_blendmodes * 2;
+				if (newmax == 0)
+					newmax = 4;
+				pdev->blendmodes = fz_resize_array(ctx, pdev->blendmodes, newmax, sizeof(*pdev->blendmodes));
+				pdev->max_blendmodes = newmax;
+			}
+			egs = pdf_new_dict(doc, 2);
+			pdf_dict_puts_drop(egs, "Type", pdf_new_name(doc, "ExtGState"));
+			pdf_dict_puts_drop(egs, "BM", pdf_new_name(doc, fz_blendmode_name(blendmode)));
+			egs_ref = pdf_new_ref(doc, egs);
+			{
+				char text[32];
+				snprintf(text, sizeof(text), "ExtGState/BM%d", pdev->num_blendmodes++);
+				pdf_dict_putp(pdev->resources, text, egs_ref);
+				pdf_drop_obj(egs_ref);
+			}
+			pdev->blendmodes[pdev->num_blendmodes - 1] = blendmode;
+		}
+		gs = CURRENT_GSTATE(pdev);
+		fz_buffer_printf(ctx, gs->buf, "/BM%d gs\n", num);
+	}
+	fz_catch(ctx)
+	{
+		fz_rethrow(ctx);
+	}
 }
 
 static void
